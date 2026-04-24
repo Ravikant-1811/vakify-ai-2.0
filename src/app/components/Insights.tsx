@@ -1,7 +1,48 @@
+import { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, Target, Brain, AlertCircle, CheckCircle2, Lightbulb } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { apiFetch } from '../lib/api';
+
+type StudyPlan = {
+  title: string;
+  learning_style: string;
+  overview: string;
+  focus_area: string;
+  strengths: string[];
+  gaps: string[];
+  today_plan: Array<{ title: string; minutes: number; action: string; success_criteria: string }>;
+  weekly_plan: Array<{ day: string; focus: string; task: string }>;
+  quick_wins: string[];
+  next_action: string;
+  motivation: string;
+  source?: string;
+};
 
 export function Insights() {
+  const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPlan = async () => {
+      try {
+        const plan = await apiFetch<StudyPlan>('/api/ai/study-plan');
+        if (!cancelled) {
+          setStudyPlan(plan);
+        }
+      } catch {
+        if (!cancelled) {
+          setStudyPlan(null);
+        }
+      }
+    };
+
+    void loadPlan();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const topicConfidence = [
     { topic: 'Arrays', confidence: 85, trend: 'up' },
     { topic: 'Sorting', confidence: 75, trend: 'up' },
@@ -39,26 +80,47 @@ export function Insights() {
 
   const COLORS = ['#1B998B', '#F4A261', '#E76F51', '#1E3A5F'];
 
-  const recommendations = [
-    {
-      title: 'Practice Recursion Daily',
-      description: 'Your recursion confidence is low. Complete 2 recursion problems daily for the next week.',
-      impact: 'High',
-      icon: Target
-    },
-    {
-      title: 'Visual Learning Boost',
-      description: 'You learn best visually. Try using diagram mode more often in AI chat.',
-      impact: 'Medium',
-      icon: Brain
-    },
-    {
-      title: 'Maintain Your Streak',
-      description: 'You have a 7-day streak! Keep completing daily tasks to maintain momentum.',
-      impact: 'Medium',
-      icon: CheckCircle2
-    },
-  ];
+  const recommendations = studyPlan
+    ? [
+        {
+          title: studyPlan.title,
+          description: studyPlan.overview,
+          impact: 'High',
+          icon: Target,
+        },
+        {
+          title: `Focus: ${studyPlan.focus_area}`,
+          description: studyPlan.next_action,
+          impact: 'High',
+          icon: Brain,
+        },
+        {
+          title: 'Quick Wins',
+          description: studyPlan.quick_wins.slice(0, 2).join(' • '),
+          impact: 'Medium',
+          icon: CheckCircle2,
+        },
+      ]
+    : [
+        {
+          title: 'Practice Recursion Daily',
+          description: 'Your recursion confidence is low. Complete 2 recursion problems daily for the next week.',
+          impact: 'High',
+          icon: Target
+        },
+        {
+          title: 'Visual Learning Boost',
+          description: 'You learn best visually. Try using diagram mode more often in AI chat.',
+          impact: 'Medium',
+          icon: Brain
+        },
+        {
+          title: 'Maintain Your Streak',
+          description: 'You have a 7-day streak! Keep completing daily tasks to maintain momentum.',
+          impact: 'Medium',
+          icon: CheckCircle2
+        },
+      ];
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
@@ -256,6 +318,22 @@ export function Insights() {
             <Lightbulb className="w-5 h-5 text-accent" />
             Personalized Recommendations
           </h3>
+
+          {studyPlan && (
+            <div className="mb-4 rounded-lg border border-secondary/20 bg-secondary/5 p-4">
+              <div className="text-xs uppercase tracking-wide text-secondary mb-1">AI Study Plan</div>
+              <div className="text-sm font-medium mb-2">{studyPlan.title}</div>
+              <p className="text-xs text-muted-foreground mb-3">{studyPlan.motivation}</p>
+              <div className="space-y-2 text-xs text-muted-foreground">
+                {studyPlan.today_plan.slice(0, 2).map((item) => (
+                  <div key={item.title} className="rounded-md bg-background/80 p-3 border border-border">
+                    <div className="font-medium text-foreground">{item.title} • {item.minutes} min</div>
+                    <div>{item.action}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-4">
             {recommendations.map((rec, index) => {

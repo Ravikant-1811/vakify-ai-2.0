@@ -9,10 +9,13 @@ import requests
 
 
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech"
 OPENAI_IMAGE_URL = "https://api.openai.com/v1/images/generations"
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 NVIDIA_IMAGE_URL = "https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-3-medium"
+OPENAI_DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4").strip() or "gpt-5.4"
+OPENAI_FAST_MODEL = os.getenv("OPENAI_FAST_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini"
 
 
 def _extract_text(payload: dict[str, Any]) -> str:
@@ -54,9 +57,70 @@ def _extract_json(text: str) -> dict[str, Any] | None:
         return None
 
 
-def chatgpt_json(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any] | None:
+def _responses_request(
+    *,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.3,
+    response_format: dict[str, Any] | None = None,
+    max_output_tokens: int | None = None,
+) -> dict[str, Any] | None:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+    if not api_key:
+        return None
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "input": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": temperature,
+    }
+    if response_format:
+        payload["text"] = {"format": response_format}
+    if max_output_tokens is not None:
+        payload["max_output_tokens"] = max_output_tokens
+
+    try:
+        response = requests.post(
+            OPENAI_RESPONSES_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=35,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return None
+
+
+def _responses_output_text(data: dict[str, Any] | None) -> str | None:
+    if not data:
+        return None
+    text = _extract_text(data)
+    return text or None
+
+
+def chatgpt_json(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any] | None:
+    responses_data = _responses_request(
+        model=OPENAI_FAST_MODEL,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+        response_format={"type": "json_object"},
+    )
+    if responses_data:
+        parsed = _extract_json(_responses_output_text(responses_data) or "")
+        if parsed is not None:
+            return parsed
+
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    model = os.getenv("OPENAI_MODEL", OPENAI_DEFAULT_MODEL).strip() or OPENAI_DEFAULT_MODEL
     if not api_key:
         return None
 
@@ -87,8 +151,18 @@ def chatgpt_json(system_prompt: str, user_prompt: str, temperature: float = 0.3)
 
 
 def chatgpt_text(system_prompt: str, user_prompt: str, temperature: float = 0.4) -> str | None:
+    responses_data = _responses_request(
+        model=OPENAI_DEFAULT_MODEL,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+    )
+    text = _responses_output_text(responses_data)
+    if text:
+        return text
+
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+    model = os.getenv("OPENAI_MODEL", OPENAI_DEFAULT_MODEL).strip() or OPENAI_DEFAULT_MODEL
     if not api_key:
         return None
 
@@ -115,6 +189,32 @@ def chatgpt_text(system_prompt: str, user_prompt: str, temperature: float = 0.4)
         return text or None
     except Exception:
         return None
+
+
+def openai_json_schema(
+    system_prompt: str,
+    user_prompt: str,
+    schema: dict[str, Any],
+    name: str,
+    temperature: float = 0.2,
+    model: str | None = None,
+) -> dict[str, Any] | None:
+    responses_data = _responses_request(
+        model=model or OPENAI_FAST_MODEL,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+        response_format={
+            "type": "json_schema",
+            "name": name,
+            "schema": schema,
+            "strict": True,
+        },
+    )
+    if not responses_data:
+        return None
+    parsed = _extract_json(_responses_output_text(responses_data) or "")
+    return parsed
 
 
 def generate_tts_mp3(text: str, output_path: str) -> bool:
