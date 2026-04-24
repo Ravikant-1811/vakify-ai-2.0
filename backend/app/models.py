@@ -204,3 +204,48 @@ class LeaderboardSnapshot(db.Model):
     rank = db.Column(db.Integer, nullable=False)
     score = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UserSettings(db.Model):
+    __tablename__ = "user_settings"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), primary_key=True)
+    theme = db.Column(db.String(20), default="light", nullable=False)
+    language = db.Column(db.String(20), default="en", nullable=False)
+    notifications_json = db.Column(db.JSON, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class CodeLabSubmission(db.Model):
+    __tablename__ = "code_lab_submissions"
+
+    submission_id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
+    language = db.Column(db.String(20), nullable=False)
+    challenge_key = db.Column(db.String(80), nullable=False, index=True)
+    title = db.Column(db.String(255), nullable=False)
+    source_code = db.Column(db.Text, nullable=False)
+    stdout = db.Column(db.Text, nullable=True)
+    stderr = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), default="pending", nullable=False)
+    passed_tests = db.Column(db.Integer, default=0, nullable=False)
+    total_tests = db.Column(db.Integer, default=0, nullable=False)
+    score = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ModerationItem(db.Model):
+    __tablename__ = "moderation_items"
+
+    moderation_id = db.Column(db.Integer, primary_key=True)
+    item_type = db.Column(db.String(20), nullable=False)
+    source_id = db.Column(db.Integer, nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
+    content = db.Column(db.Text, nullable=False)
+    reason = db.Column(db.String(255), nullable=False)
+    confidence = db.Column(db.String(20), nullable=False)
+    status = db.Column(db.String(20), default="pending", nullable=False)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

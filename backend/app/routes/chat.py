@@ -1,8 +1,10 @@
+from datetime import datetime
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError
 from app.extensions import db
-from app.models import LearningStyle, ChatHistory, Download, ChatFeedback
+from app.models import LearningStyle, ChatHistory, Download, ChatFeedback, ModerationItem
 from app.services.chatbot_service import generate_adaptive_response, get_quick_prompts
 from app.services.download_service import create_download_file
 from app.services.practice_task_service import generate_practice_tasks_from_topic
@@ -223,5 +225,29 @@ def chat_feedback():
     else:
         row.rating = rating
         row.comment = comment or None
+
+    moderation_row = ModerationItem.query.filter_by(item_type="feedback", source_id=chat_id, user_id=user_id).first()
+    if rating == -1:
+        if not moderation_row:
+            chat_row = ChatHistory.query.filter_by(chat_id=chat_id, user_id=user_id).first()
+            content = comment or (chat_row.response if chat_row else "")
+            moderation_row = ModerationItem(
+                item_type="feedback",
+                source_id=chat_id,
+                user_id=user_id,
+                content=content or "Feedback flagged for review.",
+                reason="Negative feedback",
+                confidence="Medium",
+                status="pending",
+            )
+            db.session.add(moderation_row)
+        else:
+            moderation_row.status = "pending"
+            moderation_row.reason = "Negative feedback"
+            moderation_row.reviewed_by = None
+            moderation_row.reviewed_at = None
+    elif moderation_row and moderation_row.status == "pending":
+        moderation_row.status = "reviewed"
+        moderation_row.reviewed_at = datetime.utcnow()
     db.session.commit()
     return jsonify({"message": "feedback saved", "chat_id": chat_id, "rating": rating})

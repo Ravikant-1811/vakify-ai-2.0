@@ -1,8 +1,88 @@
-import { useAuth } from '../contexts/AuthContext';
+import { useEffect, useState } from 'react';
 import { User, Bell, Lock, Palette, Globe } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { apiFetch } from '../lib/api';
+
+type SettingsResponse = {
+  theme: 'light' | 'dark' | 'system';
+  language: string;
+  notifications: {
+    daily_tasks?: boolean;
+    weekly_quiz?: boolean;
+    achievements?: boolean;
+    streak_alerts?: boolean;
+  };
+};
 
 export function Settings() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+  const [displayName, setDisplayName] = useState(user?.displayName || '');
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light');
+  const [language, setLanguage] = useState('English');
+  const [notifications, setNotifications] = useState({
+    daily_tasks: true,
+    weekly_quiz: true,
+    achievements: true,
+    streak_alerts: true,
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const data = await apiFetch<SettingsResponse>('/api/settings/me');
+        if (cancelled) {
+          return;
+        }
+        setTheme(data.theme || 'light');
+        setLanguage(data.language || 'English');
+        setNotifications({
+          daily_tasks: data.notifications?.daily_tasks ?? true,
+          weekly_quiz: data.notifications?.weekly_quiz ?? true,
+          achievements: data.notifications?.achievements ?? true,
+          streak_alerts: data.notifications?.streak_alerts ?? true,
+        });
+      } catch {
+        if (!cancelled) {
+          setTheme('light');
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setDisplayName(user?.displayName || '');
+  }, [user?.displayName]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      if (displayName.trim() && displayName !== user?.displayName) {
+        await updateUser({ displayName: displayName.trim() });
+      }
+
+      await apiFetch('/api/settings/me', {
+        method: 'PUT',
+        body: JSON.stringify({
+          theme,
+          language,
+          notifications,
+        }),
+      });
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="p-6 lg:p-8 max-w-4xl mx-auto">
@@ -25,7 +105,8 @@ export function Settings() {
               <label className="block text-sm mb-2">Display Name</label>
               <input
                 type="text"
-                defaultValue={user?.displayName}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
                 className="w-full px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
               />
             </div>
@@ -50,10 +131,10 @@ export function Settings() {
 
           <div className="space-y-4">
             {[
-              { label: 'Daily task reminders', description: 'Get notified about new daily tasks' },
-              { label: 'Weekly quiz availability', description: 'Receive alerts when new quizzes are available' },
-              { label: 'Achievement unlocked', description: 'Celebrate when you earn new badges' },
-              { label: 'Streak alerts', description: 'Reminders to maintain your learning streak' },
+              { key: 'daily_tasks' as const, label: 'Daily task reminders', description: 'Get notified about new daily tasks' },
+              { key: 'weekly_quiz' as const, label: 'Weekly quiz availability', description: 'Receive alerts when new quizzes are available' },
+              { key: 'achievements' as const, label: 'Achievement unlocked', description: 'Celebrate when you earn new badges' },
+              { key: 'streak_alerts' as const, label: 'Streak alerts', description: 'Reminders to maintain your learning streak' },
             ].map((item) => (
               <div key={item.label} className="flex items-start justify-between">
                 <div>
@@ -61,7 +142,12 @@ export function Settings() {
                   <div className="text-xs text-muted-foreground">{item.description}</div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" defaultChecked className="sr-only peer" />
+                  <input
+                    type="checkbox"
+                    checked={notifications[item.key]}
+                    onChange={(e) => setNotifications((prev) => ({ ...prev, [item.key]: e.target.checked }))}
+                    className="sr-only peer"
+                  />
                   <div className="w-11 h-6 bg-muted rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary"></div>
                 </label>
               </div>
@@ -103,10 +189,14 @@ export function Settings() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm mb-2">Theme</label>
-              <select className="w-full px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary">
-                <option>Light</option>
-                <option>Dark</option>
-                <option>System</option>
+              <select
+                value={theme}
+                onChange={(e) => setTheme(e.target.value as typeof theme)}
+                className="w-full px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
+              >
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="system">System</option>
               </select>
             </div>
           </div>
@@ -121,7 +211,11 @@ export function Settings() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm mb-2">Preferred Language</label>
-              <select className="w-full px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary">
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
+              >
                 <option>English</option>
                 <option>Spanish</option>
                 <option>French</option>
@@ -132,8 +226,12 @@ export function Settings() {
         </div>
 
         <div className="flex gap-3">
-          <button className="bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:opacity-90 transition-opacity">
-            Save Changes
+          <button
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : saved ? 'Saved' : 'Save Changes'}
           </button>
           <button className="border border-border px-6 py-3 rounded-lg hover:bg-muted transition-colors">
             Cancel

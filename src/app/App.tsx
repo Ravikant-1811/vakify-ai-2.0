@@ -31,6 +31,34 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return <Layout>{children}</Layout>;
 }
 
+function RoleRoute({
+  children,
+  allow,
+}: {
+  children: React.ReactNode;
+  allow: Array<'admin' | 'moderator'>;
+}) {
+  const { user, ready } = useAuth();
+
+  if (!ready) {
+    return null;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!user.onboarded) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  if (!allow.includes(user.role as 'admin' | 'moderator')) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Layout>{children}</Layout>;
+}
+
 function AppRoutes() {
   const { user, ready } = useAuth();
 
@@ -49,8 +77,8 @@ function AppRoutes() {
       <Route path="/tasks" element={<PrivateRoute><TasksQuiz /></PrivateRoute>} />
       <Route path="/rewards" element={<PrivateRoute><Rewards /></PrivateRoute>} />
       <Route path="/insights" element={<PrivateRoute><Insights /></PrivateRoute>} />
-      <Route path="/moderation" element={<PrivateRoute><Moderation /></PrivateRoute>} />
-      <Route path="/admin" element={<PrivateRoute><AdminConsole /></PrivateRoute>} />
+      <Route path="/moderation" element={<RoleRoute allow={['admin', 'moderator']}><Moderation /></RoleRoute>} />
+      <Route path="/admin" element={<RoleRoute allow={['admin']}><AdminConsole /></RoleRoute>} />
       <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
 
       <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />

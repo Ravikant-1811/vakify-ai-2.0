@@ -1,51 +1,73 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, XCircle, Flag, Eye } from 'lucide-react';
+import { apiFetch } from '../lib/api';
+
+type ModerationItem = {
+  moderation_id: number;
+  item_type: string;
+  source_id: number | null;
+  user_id: number;
+  content: string;
+  reason: string;
+  confidence: string;
+  status: string;
+  reviewed_by: number | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
 
 export function Moderation() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'reviewed'>('all');
+  const [items, setItems] = useState<ModerationItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const flaggedContent = [
-    {
-      id: 1,
-      type: 'chat',
-      user: 'John Doe',
-      content: 'How do I implement a hash table in Python?',
-      confidence: 'Low',
-      reason: 'Low confidence response',
-      status: 'pending',
-      flaggedAt: '2026-04-24 10:30 AM'
-    },
-    {
-      id: 2,
-      type: 'feedback',
-      user: 'Jane Smith',
-      content: 'This explanation was not helpful at all.',
-      confidence: 'Medium',
-      reason: 'Negative feedback',
-      status: 'pending',
-      flaggedAt: '2026-04-24 09:15 AM'
-    },
-    {
-      id: 3,
-      type: 'chat',
-      user: 'Mike Ross',
-      content: 'Explain recursion like I\'m five years old',
-      confidence: 'High',
-      reason: 'User report',
-      status: 'reviewed',
-      flaggedAt: '2026-04-23 04:20 PM',
-      reviewedAt: '2026-04-23 05:00 PM'
-    },
-  ];
+  useEffect(() => {
+    let cancelled = false;
 
-  const filteredContent = flaggedContent.filter(item =>
-    filter === 'all' || item.status === filter
+    const load = async () => {
+      try {
+        const data = await apiFetch<{ items: ModerationItem[] }>('/api/moderation/queue');
+        if (!cancelled) {
+          setItems(data.items || []);
+        }
+      } catch {
+        if (!cancelled) {
+          setItems([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredContent = useMemo(
+    () => items.filter((item) => filter === 'all' || item.status === filter),
+    [filter, items],
   );
 
-  const stats = {
-    pending: flaggedContent.filter(i => i.status === 'pending').length,
-    reviewed: flaggedContent.filter(i => i.status === 'reviewed').length,
-    total: flaggedContent.length
+  const stats = useMemo(
+    () => ({
+      pending: items.filter((i) => i.status === 'pending').length,
+      reviewed: items.filter((i) => i.status !== 'pending').length,
+      total: items.length,
+    }),
+    [items],
+  );
+
+  const handleResolve = async (moderationId: number, action: 'approve' | 'reject') => {
+    await apiFetch(`/api/moderation/items/${moderationId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+    const data = await apiFetch<{ items: ModerationItem[] }>('/api/moderation/queue');
+    setItems(data.items || []);
   };
 
   return (
@@ -109,8 +131,8 @@ export function Moderation() {
         </div>
 
         <div className="divide-y divide-border">
-          {filteredContent.map((item) => (
-            <div key={item.id} className="p-6 hover:bg-muted/50 transition-colors">
+          {!loading && filteredContent.map((item) => (
+            <div key={item.moderation_id} className="p-6 hover:bg-muted/50 transition-colors">
               <div className="flex items-start gap-4">
                 <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${
                   item.status === 'pending' ? 'bg-accent/10' : 'bg-secondary/10'
@@ -126,7 +148,7 @@ export function Moderation() {
                   <div className="flex items-start justify-between mb-2">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
-                        <h4 className="text-sm">{item.user}</h4>
+                        <h4 className="text-sm">User #{item.user_id}</h4>
                         <div className={`px-2 py-1 rounded text-xs ${
                           item.confidence === 'High' ? 'bg-secondary/10 text-secondary' :
                           item.confidence === 'Medium' ? 'bg-accent/10 text-accent' :
@@ -135,7 +157,7 @@ export function Moderation() {
                           {item.confidence} Confidence
                         </div>
                         <div className="px-2 py-1 rounded text-xs bg-muted text-muted-foreground">
-                          {item.type}
+                          {item.item_type}
                         </div>
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">{item.reason}</p>
@@ -148,21 +170,27 @@ export function Moderation() {
                   </div>
 
                   <div className="bg-muted/50 rounded-lg p-4 mb-3">
-                    <p className="text-sm">{item.content}</p>
+                    <p className="text-sm whitespace-pre-wrap">{item.content}</p>
                   </div>
 
                   <div className="flex items-center justify-between text-xs text-muted-foreground mb-4">
-                    <span>Flagged: {item.flaggedAt}</span>
-                    {item.reviewedAt && <span>Reviewed: {item.reviewedAt}</span>}
+                    <span>Flagged: {item.created_at}</span>
+                    {item.reviewed_at && <span>Reviewed: {item.reviewed_at}</span>}
                   </div>
 
                   {item.status === 'pending' && (
                     <div className="flex gap-3">
-                      <button className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:opacity-90 transition-opacity">
+                      <button
+                        onClick={() => void handleResolve(item.moderation_id, 'approve')}
+                        className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:opacity-90 transition-opacity"
+                      >
                         <CheckCircle2 className="w-4 h-4" />
                         Approve
                       </button>
-                      <button className="flex items-center gap-2 px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition-opacity">
+                      <button
+                        onClick={() => void handleResolve(item.moderation_id, 'reject')}
+                        className="flex items-center gap-2 px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition-opacity"
+                      >
                         <XCircle className="w-4 h-4" />
                         Reject
                       </button>
@@ -177,10 +205,17 @@ export function Moderation() {
             </div>
           ))}
 
-          {filteredContent.length === 0 && (
+          {!loading && filteredContent.length === 0 && (
             <div className="p-12 text-center text-muted-foreground">
               <Flag className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>No items to review</p>
+            </div>
+          )}
+
+          {loading && (
+            <div className="p-12 text-center text-muted-foreground">
+              <Flag className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>Loading moderation queue...</p>
             </div>
           )}
         </div>

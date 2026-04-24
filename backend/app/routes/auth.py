@@ -5,7 +5,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from app.extensions import db
 from app.models import LearningStyle, PracticeActivity, RewardWallet, User, UserProfile, UserStreak, WeeklyQuizAttempt
-from app.services.admin_auth import is_admin_email
+from app.services.admin_auth import get_role_for_email, is_admin_email
 from app.services.user_cleanup import delete_user_with_related_data
 
 
@@ -94,7 +94,7 @@ def _serialize_user(user: User) -> dict:
         "email": user.email,
         "displayName": user.name,
         "avatar": None,
-        "role": "admin" if is_admin_email(user.email) else "learner",
+        "role": get_role_for_email(user.email),
         "xp": summary["xp"],
         "level": summary["level"],
         "streak": summary["streak"],
