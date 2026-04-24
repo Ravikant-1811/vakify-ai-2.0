@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Send, Lightbulb, ImageIcon, Code2, Gamepad2, HelpCircle, ThumbsUp, ThumbsDown, Volume2, Sparkles } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 
 type ConfidenceLevel = 'High' | 'Medium' | 'Low';
 type ResponseTab = 'explain' | 'diagram' | 'code' | 'practice' | 'quiz';
@@ -13,39 +14,107 @@ interface Message {
 }
 
 export function AIChat() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: 'What is a binary search algorithm?',
-      confidence: 'High',
-      timestamp: new Date()
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [activeTab, setActiveTab] = useState<ResponseTab>('explain');
   const [mode, setMode] = useState<'concise' | 'detailed' | 'eli5' | 'exam'>('detailed');
+  const [sending, setSending] = useState(false);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  useEffect(() => {
+    let cancelled = false;
 
+    const loadHistory = async () => {
+      try {
+        const rows = await apiFetch<Array<{
+          chat_id: number;
+          question: string;
+          response: string;
+          response_type: string;
+          timestamp: string;
+        }>>('/api/chat/history');
+
+        if (cancelled) {
+          return;
+        }
+
+        const chronological = [...rows].reverse();
+        const restored: Message[] = [];
+        chronological.forEach((row) => {
+          restored.push({
+            id: `q-${row.chat_id}`,
+            role: 'user',
+            content: row.question,
+            timestamp: new Date(row.timestamp),
+          });
+          restored.push({
+            id: `a-${row.chat_id}`,
+            role: 'assistant',
+            content: row.response,
+            confidence: confidenceFromResponseType(row.response_type),
+            timestamp: new Date(row.timestamp),
+          });
+        });
+
+        if (restored.length) {
+          setMessages(restored);
+        } else {
+          setMessages([starterMessage()]);
+        }
+      } catch {
+        if (!cancelled) {
+          setMessages([starterMessage()]);
+        }
+      }
+    };
+
+    void loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSend = async () => {
+    if (!input.trim() || sending) return;
+
+    const question = input.trim();
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: `u-${Date.now()}`,
       role: 'user',
-      content: input,
+      content: question,
       timestamp: new Date()
     };
 
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      content: input,
-      confidence: 'High',
-      timestamp: new Date()
-    };
-
-    setMessages([...messages, userMessage, assistantMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setInput('');
+    setSending(true);
+
+    try {
+      const response = await apiFetch<Record<string, any>>('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ question }),
+      });
+
+      const assistantMessage: Message = {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        content: String(response.text || response.response || 'I could not generate a response right now.'),
+        confidence: confidenceFromResponseType(String(response.response_type || 'detailed')),
+        timestamp: new Date()
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+    } catch (error) {
+      const assistantMessage: Message = {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        content: error instanceof Error ? error.message : 'Sorry, the assistant is temporarily unavailable.',
+        confidence: 'Low',
+        timestamp: new Date()
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+    } finally {
+      setSending(false);
+    }
   };
 
   const confidenceColor = {
@@ -87,10 +156,16 @@ export function AIChat() {
         <div className="mb-4">
           <h3 className="text-sm text-muted-foreground mb-2">Quick Actions</h3>
           <div className="space-y-1">
-            <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors">
+            <button
+              onClick={() => setMessages([starterMessage()])}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors"
+            >
               New Chat
             </button>
-            <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors">
+            <button
+              onClick={() => setMessages([])}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors"
+            >
               Clear History
             </button>
           </div>
@@ -102,6 +177,7 @@ export function AIChat() {
             {['Binary Search', 'Sorting Algorithms', 'Hash Tables', 'Recursion'].map((topic) => (
               <button
                 key={topic}
+                onClick={() => setInput(topic)}
                 className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors text-foreground"
               >
                 {topic}
@@ -158,100 +234,7 @@ export function AIChat() {
                     </div>
 
                     <div className="mb-6">
-                      {activeTab === 'explain' && (
-                        <div className="space-y-4">
-                          <p>
-                            Binary search is an efficient algorithm for finding an item from a sorted list of items.
-                            It works by repeatedly dividing the search interval in half.
-                          </p>
-                          <div className="bg-muted/50 rounded-lg p-4">
-                            <h4 className="text-sm mb-2">How it works:</h4>
-                            <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                              <li>Compare target value to the middle element</li>
-                              <li>If equal, the position is returned</li>
-                              <li>If target is less, search the left half</li>
-                              <li>If target is greater, search the right half</li>
-                              <li>Repeat until the value is found or interval is empty</li>
-                            </ol>
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            Time Complexity: O(log n) | Space Complexity: O(1)
-                          </p>
-                        </div>
-                      )}
-                      {activeTab === 'diagram' && (
-                        <div className="bg-muted/50 rounded-lg p-8 text-center">
-                          <div className="space-y-4">
-                            <div className="text-sm text-muted-foreground mb-4">Binary Search Visualization</div>
-                            <div className="flex justify-center gap-2">
-                              {[1, 3, 5, 7, 9, 11, 13, 15, 17].map((num, i) => (
-                                <div
-                                  key={i}
-                                  className={`w-12 h-12 flex items-center justify-center rounded border-2 ${
-                                    i === 4 ? 'border-secondary bg-secondary/10' : 'border-border'
-                                  }`}
-                                >
-                                  {num}
-                                </div>
-                              ))}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              Middle element highlighted in teal
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      {activeTab === 'code' && (
-                        <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 font-mono text-sm">
-                          <pre className="overflow-x-auto">
-{`def binary_search(arr, target):
-    left, right = 0, len(arr) - 1
-
-    while left <= right:
-        mid = (left + right) // 2
-
-        if arr[mid] == target:
-            return mid
-        elif arr[mid] < target:
-            left = mid + 1
-        else:
-            right = mid - 1
-
-    return -1`}
-                          </pre>
-                        </div>
-                      )}
-                      {activeTab === 'practice' && (
-                        <div className="space-y-4">
-                          <div className="bg-muted/50 rounded-lg p-4">
-                            <h4 className="text-sm mb-3">Practice Exercise</h4>
-                            <p className="text-sm text-muted-foreground mb-4">
-                              Implement binary search to find the number 7 in the array [1, 3, 5, 7, 9, 11, 13]
-                            </p>
-                            <button className="bg-secondary text-secondary-foreground px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
-                              Start Practice
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {activeTab === 'quiz' && (
-                        <div className="space-y-4">
-                          <div className="bg-muted/50 rounded-lg p-4">
-                            <h4 className="text-sm mb-3">Quick Quiz</h4>
-                            <p className="text-sm mb-4">What is the time complexity of binary search?</p>
-                            <div className="space-y-2">
-                              {['O(n)', 'O(log n)', 'O(n²)', 'O(1)'].map((option) => (
-                                <button
-                                  key={option}
-                                  className="w-full text-left px-4 py-3 rounded-lg border border-border hover:border-secondary hover:bg-secondary/5 transition-colors"
-                                >
-                                  {option}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      {renderTabContent(activeTab, message)}
                     </div>
 
                     <div className="flex items-center gap-4 pt-4 border-t border-border">
@@ -271,7 +254,7 @@ export function AIChat() {
                   </div>
                 </div>
               ) : (
-                <div className="bg-primary text-primary-foreground rounded-xl px-6 py-3 max-w-md">
+                <div className="bg-primary text-primary-foreground rounded-xl px-6 py-3 max-w-md whitespace-pre-wrap">
                   {message.content}
                 </div>
               )}
@@ -280,28 +263,116 @@ export function AIChat() {
         </div>
 
         <div className="border-t border-border p-4 bg-card">
-          <div className="max-w-3xl mx-auto">
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Ask anything about programming..."
-                className="flex-1 px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
-              />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim()}
-                className="bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="mt-2 text-xs text-muted-foreground text-center">
-              Ask questions, request explanations, or explore topics
-            </div>
+          <div className="flex gap-3">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  void handleSend();
+                }
+              }}
+              className="flex-1 px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
+              placeholder="Ask anything..."
+            />
+            <button
+              onClick={() => void handleSend()}
+              disabled={!input.trim() || sending}
+              className="bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
+            >
+              <Send className="w-4 h-4" />
+              {sending ? 'Thinking...' : 'Send'}
+            </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function starterMessage(): Message {
+  return {
+    id: 'starter',
+    role: 'assistant',
+    content: 'Ask me anything about your learning topic and I will answer from the backend tutor engine.',
+    confidence: 'High',
+    timestamp: new Date(),
+  };
+}
+
+function confidenceFromResponseType(responseType: string): ConfidenceLevel {
+  if (responseType === 'visual') return 'High';
+  if (responseType === 'auditory') return 'Medium';
+  return 'High';
+}
+
+function renderTabContent(tab: ResponseTab, message: Message) {
+  if (tab === 'explain') {
+    return (
+      <div className="space-y-4">
+        <pre className="whitespace-pre-wrap text-sm leading-6 bg-muted/50 rounded-lg p-4">
+          {message.content}
+        </pre>
+      </div>
+    );
+  }
+
+  if (tab === 'diagram') {
+    return (
+      <div className="bg-muted/50 rounded-lg p-8 text-center">
+        <div className="space-y-4">
+          <div className="text-sm text-muted-foreground mb-4">Generated Learning Response</div>
+          <div className="mx-auto max-w-xl text-sm leading-6 whitespace-pre-wrap text-left">
+            {message.content}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Use the response above as the basis for diagrams, flow maps, and visual notes.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (tab === 'code') {
+    return (
+      <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 font-mono text-sm">
+        <pre className="overflow-x-auto whitespace-pre-wrap">
+          {message.content}
+        </pre>
+      </div>
+    );
+  }
+
+  if (tab === 'practice') {
+    return (
+      <div className="space-y-4">
+        <div className="bg-muted/50 rounded-lg p-4">
+          <h4 className="text-sm mb-3">Practice Exercise</h4>
+          <p className="text-sm text-muted-foreground mb-4 whitespace-pre-wrap">
+            {message.content}
+          </p>
+          <button className="bg-secondary text-secondary-foreground px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
+            Start Practice
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-muted/50 rounded-lg p-4">
+        <h4 className="text-sm mb-3">Quick Quiz</h4>
+        <p className="text-sm mb-4 whitespace-pre-wrap">{message.content}</p>
+        <div className="space-y-2">
+          {['O(n)', 'O(log n)', 'O(n²)', 'O(1)'].map((option) => (
+            <button
+              key={option}
+              className="w-full text-left px-4 py-3 rounded-lg border border-border hover:border-secondary hover:bg-secondary/5 transition-colors"
+            >
+              {option}
+            </button>
+          ))}
         </div>
       </div>
     </div>

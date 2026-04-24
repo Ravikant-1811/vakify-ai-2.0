@@ -1,4 +1,4 @@
-import { useAuth } from '../contexts/AuthContext';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import {
   TrendingUp,
@@ -13,19 +13,140 @@ import {
   Zap
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { useAuth } from '../contexts/AuthContext';
+import { apiFetch } from '../lib/api';
+
+type TimelineRow = { date: string; count: number };
+
+type DashboardSummary = {
+  mastery_score: number;
+  streak_days: number;
+  recommended_topic: string;
+  daily_chat: TimelineRow[];
+  daily_practice: TimelineRow[];
+  daily_downloads: TimelineRow[];
+};
+
+type RewardSummary = {
+  wallet: { current_xp: number; level: number; reward_points: number };
+  streak: { current_streak: number; longest_streak: number; last_active_date: string | null };
+  recent_xp_events: Array<{ event_id: number; source: string; points: number; created_at: string }>;
+};
+
+type TaskRow = {
+  task_id: number;
+  title: string;
+  description: string;
+  task_type: string;
+  difficulty: string;
+  status: string;
+  points_reward: number;
+};
+
+type QuizResponse = {
+  quiz: {
+    quiz_id: number;
+    title: string;
+    week_start: string;
+    week_end: string;
+    difficulty: string;
+    questions: Array<{ id: number }>;
+  };
+  attempts: number;
+  best_score: number;
+};
+
+type LeaderboardResponse = {
+  rows: Array<{ rank: number; name: string; score: number }>;
+  me: { rank: number | null; score: number };
+};
 
 export function Dashboard() {
   const { user } = useAuth();
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [rewards, setRewards] = useState<RewardSummary | null>(null);
+  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [quiz, setQuiz] = useState<QuizResponse['quiz'] | null>(null);
+  const [quizAttempts, setQuizAttempts] = useState(0);
+  const [quizBestScore, setQuizBestScore] = useState(0);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardResponse['rows']>([]);
+  const [myRank, setMyRank] = useState<number | null>(null);
 
-  const xpData = [
-    { day: 'Mon', xp: 120 },
-    { day: 'Tue', xp: 180 },
-    { day: 'Wed', xp: 150 },
-    { day: 'Thu', xp: 220 },
-    { day: 'Fri', xp: 190 },
-    { day: 'Sat', xp: 250 },
-    { day: 'Sun', xp: 140 },
-  ];
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const results = await Promise.allSettled([
+          apiFetch<DashboardSummary>('/api/dashboard/insights'),
+          apiFetch<RewardSummary>('/api/rewards/summary'),
+          apiFetch<{ tasks: TaskRow[] }>('/api/tasks/today'),
+          apiFetch<QuizResponse>('/api/quiz/weekly'),
+          apiFetch<LeaderboardResponse>('/api/leaderboard?scope=weekly'),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        const [summaryRes, rewardsRes, tasksRes, quizRes, leaderboardRes] = results;
+        if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value);
+        if (rewardsRes.status === 'fulfilled') setRewards(rewardsRes.value);
+        if (tasksRes.status === 'fulfilled') setTasks(tasksRes.value.tasks || []);
+        if (quizRes.status === 'fulfilled') {
+          setQuiz(quizRes.value.quiz);
+          setQuizAttempts(quizRes.value.attempts);
+          setQuizBestScore(quizRes.value.best_score);
+        }
+        if (leaderboardRes.status === 'fulfilled') {
+          setLeaderboard(leaderboardRes.value.rows || []);
+          setMyRank(leaderboardRes.value.me.rank);
+        }
+      } catch {
+        if (!cancelled) {
+          setSummary(null);
+          setRewards(null);
+          setTasks([]);
+          setQuiz(null);
+          setLeaderboard([]);
+          setMyRank(null);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const xpData = (() => {
+    const fallback = [
+      { day: 'Mon', xp: 120 },
+      { day: 'Tue', xp: 180 },
+      { day: 'Wed', xp: 150 },
+      { day: 'Thu', xp: 220 },
+      { day: 'Fri', xp: 190 },
+      { day: 'Sat', xp: 250 },
+      { day: 'Sun', xp: 140 },
+    ];
+    if (!summary) {
+      return fallback;
+    }
+
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const totals = new Map<string, number>();
+    [...summary.daily_chat, ...summary.daily_practice, ...summary.daily_downloads].forEach((row) => {
+      const parsed = new Date(`${row.date}T00:00:00`);
+      const label = labels[parsed.getDay() === 0 ? 6 : parsed.getDay() - 1];
+      totals.set(label, (totals.get(label) || 0) + row.count);
+    });
+
+    return labels.map((day, idx) => ({
+      day,
+      xp: (totals.get(day) || 0) * 40 + (idx + 1) * 15,
+    }));
+  })();
 
   const languageProgress = [
     { lang: 'Python', progress: 75 },
@@ -34,35 +155,34 @@ export function Dashboard() {
     { lang: 'C++', progress: 30 },
   ];
 
-  const leaderboard = [
-    { rank: 1, name: 'Alex Chen', xp: 2450, avatar: '👨' },
-    { rank: 2, name: 'Sarah Kim', xp: 2180, avatar: '👩' },
-    { rank: 3, name: 'You', xp: user?.xp || 0, avatar: '⭐' },
-    { rank: 4, name: 'Mike Ross', xp: 1120, avatar: '👨' },
-    { rank: 5, name: 'Emma Wilson', xp: 980, avatar: '👩' },
-  ];
+  const leaderboardRows = leaderboard.length
+    ? leaderboard
+    : [
+        { rank: 1, name: 'Alex Chen', score: 2450 },
+        { rank: 2, name: 'Sarah Kim', score: 2180 },
+        { rank: 3, name: user?.displayName || 'You', score: user?.xp || 0 },
+        { rank: 4, name: 'Mike Ross', score: 1120 },
+        { rank: 5, name: 'Emma Wilson', score: 980 },
+      ];
 
+  const completedTasks = tasks.filter((task) => task.status === 'completed').length;
   const dailyTask = {
-    title: 'Master Array Manipulation',
-    description: 'Complete 3 practice problems on array methods',
-    progress: 2,
-    total: 3,
-    xp: 50
+    title: tasks[0]?.title || 'Master Array Manipulation',
+    description: tasks[0]?.description || 'Complete 3 practice problems on array methods',
+    progress: completedTasks,
+    total: Math.max(tasks.length, 3),
+    xp: tasks[0]?.points_reward || 50
   };
 
   const weeklyQuiz = {
-    title: 'Weekly Challenge: Data Structures',
-    questions: 10,
+    title: quiz?.title || 'Weekly Challenge: Data Structures',
+    questions: quiz?.questions?.length || 10,
     timeLimit: '30 min',
-    xp: 200,
-    available: true
+    xp: quizBestScore >= 80 ? 200 : 150,
+    available: Boolean(quiz),
+    attempts: quizAttempts,
+    bestScore: quizBestScore
   };
-
-  const nextTopics = [
-    { title: 'Binary Search Trees', confidence: 'Low', color: 'text-destructive' },
-    { title: 'Hash Tables', confidence: 'Medium', color: 'text-accent' },
-    { title: 'Graph Algorithms', confidence: 'High', color: 'text-secondary' },
-  ];
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
@@ -71,7 +191,7 @@ export function Dashboard() {
           Welcome back, {user?.displayName}!
         </h1>
         <p className="text-muted-foreground">
-          Let's continue your learning journey
+          Let&apos;s continue your learning journey
         </p>
       </div>
 
@@ -80,19 +200,19 @@ export function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <TrendingUp className="w-8 h-8" />
             <div className="px-3 py-1 bg-white/20 rounded-full text-xs">
-              Level {user?.level}
+              Level {rewards?.wallet.level ?? user?.level}
             </div>
           </div>
-          <div className="text-3xl mb-1">{user?.xp} XP</div>
+          <div className="text-3xl mb-1">{rewards?.wallet.current_xp ?? user?.xp ?? 0} XP</div>
           <div className="text-white/80 text-sm">Total Experience</div>
           <div className="mt-4 bg-white/20 rounded-full h-2">
             <div
               className="bg-white h-full rounded-full"
-              style={{ width: `${((user?.xp || 0) % 500) / 5}%` }}
+              style={{ width: `${((rewards?.wallet.current_xp ?? user?.xp ?? 0) % 500) / 5}%` }}
             />
           </div>
           <div className="text-xs text-white/60 mt-1">
-            {500 - ((user?.xp || 0) % 500)} XP to next level
+            {500 - ((rewards?.wallet.current_xp ?? user?.xp ?? 0) % 500)} XP to next level
           </div>
         </div>
 
@@ -103,10 +223,10 @@ export function Dashboard() {
               On Fire!
             </div>
           </div>
-          <div className="text-3xl mb-1">{user?.streak} Days</div>
+          <div className="text-3xl mb-1">{rewards?.streak.current_streak ?? user?.streak ?? 0} Days</div>
           <div className="text-white/80 text-sm">Current Streak</div>
           <div className="mt-4 text-xs text-white/90">
-            Keep going! You're on a roll
+            Keep going! You&apos;re on a roll
           </div>
         </div>
 
@@ -117,10 +237,10 @@ export function Dashboard() {
               Great!
             </div>
           </div>
-          <div className="text-3xl mb-1">{user?.accuracy}%</div>
+          <div className="text-3xl mb-1">{user?.accuracy ?? summary?.mastery_score ?? 0}%</div>
           <div className="text-white/80 text-sm">Accuracy Rate</div>
           <div className="mt-4 text-xs text-white/90">
-            You're doing excellent
+            You&apos;re doing excellent
           </div>
         </div>
 
@@ -131,7 +251,7 @@ export function Dashboard() {
               Earned
             </div>
           </div>
-          <div className="text-3xl mb-1">12</div>
+          <div className="text-3xl mb-1">{Math.max(3, rewards?.recent_xp_events.length || 0)}</div>
           <div className="text-white/80 text-sm">Total Badges</div>
           <div className="mt-4 text-xs text-white/90">
             3 more this week
@@ -196,7 +316,7 @@ export function Dashboard() {
               <div className="bg-muted rounded-full h-2">
                 <div
                   className="bg-secondary h-full rounded-full transition-all"
-                  style={{ width: `${(dailyTask.progress / dailyTask.total) * 100}%` }}
+                  style={{ width: `${Math.min(100, (dailyTask.progress / dailyTask.total) * 100)}%` }}
                 />
               </div>
             </div>
@@ -252,11 +372,11 @@ export function Dashboard() {
               Leaderboard
             </h3>
             <div className="space-y-2">
-              {leaderboard.map((entry) => (
+              {leaderboardRows.slice(0, 5).map((entry) => (
                 <div
                   key={entry.rank}
                   className={`flex items-center justify-between p-3 rounded-lg ${
-                    entry.name === 'You'
+                    entry.rank === myRank
                       ? 'bg-secondary/10 border border-secondary'
                       : 'bg-muted/50'
                   }`}
@@ -267,10 +387,10 @@ export function Dashboard() {
                     </div>
                     <div>
                       <div className="text-sm">{entry.name}</div>
-                      <div className="text-xs text-muted-foreground">{entry.xp} XP</div>
+                      <div className="text-xs text-muted-foreground">{entry.score} XP</div>
                     </div>
                   </div>
-                  {entry.name === 'You' && (
+                  {entry.rank === myRank && (
                     <Zap className="w-4 h-4 text-secondary" />
                   )}
                 </div>
@@ -278,33 +398,9 @@ export function Dashboard() {
             </div>
             <Link
               to="/rewards"
-              className="mt-4 inline-flex items-center gap-2 text-secondary hover:underline text-sm"
+              className="mt-4 inline-flex items-center gap-2 text-secondary hover:underline"
             >
-              View Full Leaderboard
-              <ChevronRight className="w-4 h-4" />
-            </Link>
-          </div>
-
-          <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-            <h3 className="text-lg mb-4 flex items-center gap-2">
-              <Target className="w-5 h-5 text-destructive" />
-              Next Recommendations
-            </h3>
-            <div className="space-y-3">
-              {nextTopics.map((topic, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <span className="text-sm">{topic.title}</span>
-                  <span className={`text-xs ${topic.color}`}>
-                    {topic.confidence}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <Link
-              to="/insights"
-              className="mt-4 inline-flex items-center gap-2 text-secondary hover:underline text-sm"
-            >
-              View All Insights
+              View All Rewards
               <ChevronRight className="w-4 h-4" />
             </Link>
           </div>

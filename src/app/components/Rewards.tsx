@@ -1,6 +1,55 @@
+import { useEffect, useState } from 'react';
 import { Trophy, Award, Star, TrendingUp, Gift, Crown, Zap } from 'lucide-react';
+import { apiFetch } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
+
+type RewardSummary = {
+  wallet: { current_xp: number; level: number; reward_points: number };
+  streak: { current_streak: number; longest_streak: number; last_active_date: string | null };
+  recent_xp_events: Array<{ event_id: number; source: string; points: number; created_at: string }>;
+};
+
+type LeaderboardRow = { rank: number; name: string; score: number };
 
 export function Rewards() {
+  const { user } = useAuth();
+  const [summary, setSummary] = useState<RewardSummary | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const results = await Promise.allSettled([
+          apiFetch<RewardSummary>('/api/rewards/summary'),
+          apiFetch<{ rows: LeaderboardRow[] }>('/api/leaderboard?scope=all_time'),
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        const [summaryRes, leaderboardRes] = results;
+        if (summaryRes.status === 'fulfilled') {
+          setSummary(summaryRes.value);
+        }
+        if (leaderboardRes.status === 'fulfilled') {
+          setLeaderboard(leaderboardRes.value.rows || []);
+        }
+      } catch {
+        if (!cancelled) {
+          setSummary(null);
+          setLeaderboard([]);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const badges = [
     { id: 1, name: 'First Steps', icon: '🎯', earned: true, date: '2026-04-01', description: 'Complete your first task' },
     { id: 2, name: 'Code Master', icon: '💻', earned: true, date: '2026-04-05', description: 'Run 10 successful code submissions' },
@@ -17,27 +66,32 @@ export function Rewards() {
     { id: 4, name: 'Priority Support', cost: 750, icon: Trophy, available: true },
   ];
 
-  const leaderboard = [
-    { rank: 1, name: 'Alex Chen', xp: 2450, badge: '👑', level: 12 },
-    { rank: 2, name: 'Sarah Kim', xp: 2180, badge: '🥈', level: 11 },
-    { rank: 3, name: 'You', xp: 1250, badge: '🥉', level: 5, highlight: true },
-    { rank: 4, name: 'Mike Ross', xp: 1120, badge: '', level: 5 },
-    { rank: 5, name: 'Emma Wilson', xp: 980, badge: '', level: 4 },
-    { rank: 6, name: 'John Doe', xp: 850, badge: '', level: 4 },
-    { rank: 7, name: 'Jane Smith', xp: 720, badge: '', level: 3 },
-    { rank: 8, name: 'Tom Brown', xp: 650, badge: '', level: 3 },
-  ];
+  const earnedBadges = badges.filter((badge) => badge.earned);
+  const lockedBadges = badges.filter((badge) => !badge.earned);
 
-  const xpHistory = [
-    { date: '2026-04-24', activity: 'Completed Daily Task', xp: 50 },
-    { date: '2026-04-24', activity: 'Lab Submission', xp: 25 },
-    { date: '2026-04-23', activity: 'Weekly Quiz', xp: 200 },
-    { date: '2026-04-23', activity: 'AI Chat Practice', xp: 15 },
-    { date: '2026-04-22', activity: 'Badge Unlocked', xp: 100 },
-  ];
+  const leaderboardRows = leaderboard.length
+    ? leaderboard
+    : [
+        { rank: 1, name: 'Alex Chen', score: 2450 },
+        { rank: 2, name: 'Sarah Kim', score: 2180 },
+        { rank: 3, name: user?.displayName || 'You', score: user?.xp || 0 },
+        { rank: 4, name: 'Mike Ross', score: 1120 },
+        { rank: 5, name: 'Emma Wilson', score: 980 },
+      ];
 
-  const earnedBadges = badges.filter(b => b.earned);
-  const lockedBadges = badges.filter(b => !b.earned);
+  const xpHistory = summary?.recent_xp_events?.length
+    ? summary.recent_xp_events.slice(0, 5).map((event) => ({
+        date: event.created_at.slice(0, 10),
+        activity: event.source.replace(/_/g, ' '),
+        xp: event.points,
+      }))
+    : [
+        { date: '2026-04-24', activity: 'Completed Daily Task', xp: 50 },
+        { date: '2026-04-24', activity: 'Lab Submission', xp: 25 },
+        { date: '2026-04-23', activity: 'Weekly Quiz', xp: 200 },
+        { date: '2026-04-23', activity: 'AI Chat Practice', xp: 15 },
+        { date: '2026-04-22', activity: 'Badge Unlocked', xp: 100 },
+      ];
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
@@ -168,11 +222,15 @@ export function Rewards() {
               <Trophy className="w-8 h-8" />
               <h2 className="text-xl">Your Rank</h2>
             </div>
-            <div className="text-5xl mb-2">#3</div>
+            <div className="text-5xl mb-2">
+              #{leaderboardRows.find((row) => row.name === user?.displayName)?.rank || 3}
+            </div>
             <div className="text-white/80 mb-4">Global Ranking</div>
             <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3">
               <div className="text-sm text-white/60 mb-1">Next Rank</div>
-              <div className="text-lg">530 XP to go</div>
+              <div className="text-lg">
+                {Math.max(0, (leaderboardRows.find((row) => row.name === user?.displayName)?.score || 0) - 530)} XP to go
+              </div>
             </div>
           </div>
 
@@ -183,24 +241,24 @@ export function Rewards() {
             </h2>
 
             <div className="space-y-2">
-              {leaderboard.map((entry) => (
+              {leaderboardRows.map((entry) => (
                 <div
                   key={entry.rank}
                   className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
-                    entry.highlight
+                    entry.name === user?.displayName
                       ? 'bg-secondary/10 border border-secondary'
                       : 'bg-muted/50 hover:bg-muted'
                   }`}
                 >
                   <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm flex-shrink-0">
-                    {entry.badge || entry.rank}
+                    {entry.rank === 1 ? '👑' : entry.rank}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm truncate">{entry.name}</div>
-                    <div className="text-xs text-muted-foreground">Level {entry.level}</div>
+                    <div className="text-xs text-muted-foreground">Score</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm">{entry.xp}</div>
+                    <div className="text-sm">{entry.score}</div>
                     <div className="text-xs text-muted-foreground">XP</div>
                   </div>
                 </div>

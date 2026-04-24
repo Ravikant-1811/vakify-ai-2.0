@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { ChevronRight, BookOpen, Code, Target, Brain } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 
 export function Onboarding() {
   const { updateUser } = useAuth();
@@ -14,11 +15,26 @@ export function Onboarding() {
 
   const topics = ['Arrays', 'Loops', 'Functions', 'OOP', 'Algorithms', 'Data Structures', 'APIs', 'Databases'];
 
-  const handleComplete = () => {
-    updateUser({
+  const handleComplete = async () => {
+    const dominantStyle = [
+      { key: 'visual', value: visualWeight },
+      { key: 'auditory', value: audioWeight },
+      { key: 'kinesthetic', value: kineticWeight },
+    ].sort((a, b) => b.value - a.value)[0]?.key || 'visual';
+
+    await updateUser({
       learningLevel,
       preferredLanguage,
+      visualWeight,
+      auditoryWeight: audioWeight,
+      kinestheticWeight: kineticWeight,
+      weakTopics,
       onboarded: true
+    });
+
+    await apiFetch('/api/style/select', {
+      method: 'POST',
+      body: JSON.stringify({ learning_style: dominantStyle }),
     });
   };
 
@@ -224,7 +240,7 @@ export function Onboarding() {
                 if (step < totalSteps) {
                   setStep(step + 1);
                 } else {
-                  handleComplete();
+                  void handleComplete();
                 }
               }}
               disabled={

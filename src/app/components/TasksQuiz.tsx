@@ -1,10 +1,75 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Trophy, Star, Play, ChevronRight } from 'lucide-react';
+import { apiFetch } from '../lib/api';
+
+type TaskRow = {
+  task_id: number;
+  title: string;
+  description: string;
+  task_type: string;
+  difficulty: string;
+  status: string;
+  points_reward: number;
+};
+
+type QuizResponse = {
+  quiz: {
+    quiz_id: number;
+    title: string;
+    week_start: string;
+    week_end: string;
+    difficulty: string;
+    questions: Array<{ id: number }>;
+  };
+  attempts: number;
+  best_score: number;
+};
 
 export function TasksQuiz() {
   const [activeTab, setActiveTab] = useState<'daily' | 'weekly'>('daily');
+  const [dailyTasks, setDailyTasks] = useState<TaskRow[]>([]);
+  const [weeklyQuiz, setWeeklyQuiz] = useState<QuizResponse['quiz'] | null>(null);
+  const [weeklyAttempts, setWeeklyAttempts] = useState(0);
+  const [weeklyBestScore, setWeeklyBestScore] = useState(0);
 
-  const dailyTasks = [
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const results = await Promise.allSettled([
+          apiFetch<{ tasks: TaskRow[] }>('/api/tasks/today'),
+          apiFetch<QuizResponse>('/api/quiz/weekly'),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        const [tasksRes, quizRes] = results;
+        if (tasksRes.status === 'fulfilled') {
+          setDailyTasks(tasksRes.value.tasks || []);
+        }
+        if (quizRes.status === 'fulfilled') {
+          setWeeklyQuiz(quizRes.value.quiz);
+          setWeeklyAttempts(quizRes.value.attempts);
+          setWeeklyBestScore(quizRes.value.best_score);
+        }
+      } catch {
+        if (!cancelled) {
+          setDailyTasks([]);
+          setWeeklyQuiz(null);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fallbackDailyTasks = [
     {
       id: 1,
       title: 'Master Array Manipulation',
@@ -25,16 +90,39 @@ export function TasksQuiz() {
     },
   ];
 
-  const weeklyQuiz = {
-    title: 'Data Structures & Algorithms',
-    questions: 10,
-    timeLimit: '30 min',
-    xp: 200,
-    difficulty: 'Intermediate',
-    topics: ['Arrays', 'Sorting', 'Search Algorithms'],
-    attempted: false,
-    bestScore: 0
-  };
+  const dailyTaskCards = dailyTasks.length
+    ? dailyTasks.map((task) => ({
+        id: task.task_id,
+        title: task.title,
+        description: task.description,
+        progress: task.status === 'completed' ? 1 : 0,
+        total: 1,
+        xp: task.points_reward,
+        type: task.task_type === 'practical' ? 'practice' : 'conceptual' as const,
+      }))
+    : fallbackDailyTasks;
+
+  const weeklyQuizCard = weeklyQuiz
+    ? {
+        title: weeklyQuiz.title,
+        questions: weeklyQuiz.questions.length,
+        timeLimit: '30 min',
+        xp: weeklyBestScore >= 80 ? 200 : 150,
+        difficulty: weeklyQuiz.difficulty,
+        topics: ['Arrays', 'Sorting', 'Search Algorithms'],
+        attempted: weeklyAttempts > 0,
+        bestScore: weeklyBestScore
+      }
+    : {
+        title: 'Data Structures & Algorithms',
+        questions: 10,
+        timeLimit: '30 min',
+        xp: 200,
+        difficulty: 'Intermediate',
+        topics: ['Arrays', 'Sorting', 'Search Algorithms'],
+        attempted: false,
+        bestScore: 0
+      };
 
   const previousQuizzes = [
     { title: 'Functions & Scope', score: 90, xp: 180, date: '2026-04-17' },
@@ -77,7 +165,7 @@ export function TasksQuiz() {
       {activeTab === 'daily' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {dailyTasks.map((task) => (
+            {dailyTaskCards.map((task) => (
               <div key={task.id} className="bg-card border border-border rounded-xl p-6 shadow-sm">
                 <div className="flex items-start justify-between mb-4">
                   <div>
@@ -144,7 +232,7 @@ export function TasksQuiz() {
               <div className="flex-1">
                 <h3 className="text-lg mb-1">Daily Streak Bonus!</h3>
                 <p className="text-sm text-muted-foreground">
-                  Complete all daily tasks to maintain your 7-day streak and earn bonus XP
+                  Complete all daily tasks to maintain your streak and earn bonus XP
                 </p>
               </div>
               <div className="text-right">
@@ -161,35 +249,35 @@ export function TasksQuiz() {
           <div className="bg-gradient-to-br from-primary to-secondary text-white rounded-xl p-8 shadow-lg">
             <div className="flex items-start justify-between mb-6">
               <div>
-                <h2 className="text-2xl mb-2">{weeklyQuiz.title}</h2>
+                <h2 className="text-2xl mb-2">{weeklyQuizCard.title}</h2>
                 <p className="text-white/80">
                   Test your knowledge and earn big XP rewards
                 </p>
               </div>
               <div className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-lg text-sm">
-                {weeklyQuiz.difficulty}
+                {weeklyQuizCard.difficulty}
               </div>
             </div>
 
             <div className="grid grid-cols-3 gap-4 mb-6">
               <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
                 <div className="text-white/60 text-sm mb-1">Questions</div>
-                <div className="text-2xl">{weeklyQuiz.questions}</div>
+                <div className="text-2xl">{weeklyQuizCard.questions}</div>
               </div>
               <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
                 <div className="text-white/60 text-sm mb-1">Time Limit</div>
-                <div className="text-2xl">{weeklyQuiz.timeLimit}</div>
+                <div className="text-2xl">{weeklyQuizCard.timeLimit}</div>
               </div>
               <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
                 <div className="text-white/60 text-sm mb-1">Reward</div>
-                <div className="text-2xl">+{weeklyQuiz.xp}</div>
+                <div className="text-2xl">+{weeklyQuizCard.xp}</div>
               </div>
             </div>
 
             <div className="mb-6">
               <div className="text-sm text-white/60 mb-2">Topics Covered:</div>
               <div className="flex flex-wrap gap-2">
-                {weeklyQuiz.topics.map((topic) => (
+                {weeklyQuizCard.topics.map((topic) => (
                   <div key={topic} className="px-3 py-1 bg-white/10 rounded-full text-sm">
                     {topic}
                   </div>

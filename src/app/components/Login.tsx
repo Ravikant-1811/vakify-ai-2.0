@@ -27,7 +27,7 @@ export function Login() {
         await login(email, password);
       }
     } catch (err) {
-      setError('Invalid credentials. Please try again.');
+      setError(err instanceof Error ? err.message : 'Invalid credentials. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -39,7 +39,7 @@ export function Login() {
     try {
       await loginWithGoogle();
     } catch (err) {
-      setError('Google login failed. Please try again.');
+      setError(err instanceof Error ? err.message : 'Google login failed. Please try again.');
     } finally {
       setLoading(false);
     }

@@ -14,7 +14,11 @@ import { Moderation } from './components/Moderation';
 import { Settings } from './components/Settings';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
+
+  if (!ready) {
+    return null;
+  }
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -28,7 +32,11 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
+
+  if (!ready) {
+    return <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">Loading Vakify...</div>;
+  }
 
   return (
     <Routes>
