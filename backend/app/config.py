@@ -15,6 +15,12 @@ def cors_origins_from_env() -> list[str] | str:
     return origins or "*"
 
 
+def normalize_database_uri(database_uri: str) -> str:
+    if database_uri.startswith("postgres://"):
+        return "postgresql://" + database_uri[len("postgres://") :]
+    return database_uri
+
+
 def build_runtime_config() -> dict:
     app_env = os.getenv("APP_ENV", "development").strip().lower()
     is_production = app_env == "production"
@@ -24,7 +30,7 @@ def build_runtime_config() -> dict:
     if is_production and (secret_key == "dev-secret" or jwt_secret == "dev-jwt-secret"):
         raise RuntimeError("Production requires strong SECRET_KEY and JWT_SECRET_KEY values")
 
-    database_uri = os.getenv("DATABASE_URL", "sqlite:///adaptive_learning.db")
+    database_uri = normalize_database_uri(os.getenv("DATABASE_URL", "sqlite:///adaptive_learning.db"))
 
     config = {
         "APP_ENV": app_env,
@@ -41,6 +47,12 @@ def build_runtime_config() -> dict:
                 "timeout": int(os.getenv("SQLITE_TIMEOUT_SECONDS", "30")),
                 "check_same_thread": False,
             }
+        }
+    else:
+        config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_pre_ping": True,
+            "pool_recycle": int(os.getenv("SQLALCHEMY_POOL_RECYCLE_SECONDS", "300")),
+            "pool_timeout": int(os.getenv("SQLALCHEMY_POOL_TIMEOUT_SECONDS", "30")),
         }
 
     return config
