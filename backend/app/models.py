@@ -241,11 +241,35 @@ class UserSettings(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class CodeLabTask(db.Model):
+    __tablename__ = "code_lab_tasks"
+
+    task_id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
+    language = db.Column(db.String(20), nullable=False, index=True)
+    task_key = db.Column(db.String(120), nullable=False, index=True)
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    starter_code = db.Column(db.Text, nullable=False)
+    sample_input = db.Column(db.Text, nullable=True)
+    expected_output = db.Column(db.Text, nullable=True)
+    hint = db.Column(db.Text, nullable=True)
+    source_chat_id = db.Column(db.Integer, db.ForeignKey("chat_history.chat_id"), nullable=True, index=True)
+    source_thread_id = db.Column(db.Integer, db.ForeignKey("chat_threads.thread_id"), nullable=True, index=True)
+    source_question = db.Column(db.Text, nullable=True)
+    source_answer = db.Column(db.Text, nullable=True)
+    validation_json = db.Column(db.JSON, nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class CodeLabSubmission(db.Model):
     __tablename__ = "code_lab_submissions"
 
     submission_id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
+    task_id = db.Column(db.Integer, db.ForeignKey("code_lab_tasks.task_id"), nullable=True, index=True)
     language = db.Column(db.String(20), nullable=False)
     challenge_key = db.Column(db.String(80), nullable=False, index=True)
     title = db.Column(db.String(255), nullable=False)

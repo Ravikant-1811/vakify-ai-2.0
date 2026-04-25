@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 
+from app.services.openai_service import chatgpt_json
 from app.services.lab_runner import run_java_code
 
 
@@ -191,6 +192,156 @@ def get_challenge(language: str | None) -> dict:
         "sample_input": challenge.sample_input,
         "expected_output": challenge.expected_output,
         "hint": challenge.hint,
+    }
+
+
+def _safe_slug(text: str, fallback: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in (text or "")).strip("-")
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned[:48] or fallback
+
+
+def _fallback_generated_task(question: str, answer: str, language: str) -> dict:
+    topic = (question or "the concept").strip().rstrip("?")
+    slug = _safe_slug(topic, "topic")
+    language = (language or "python").strip().lower()
+    if language == "javascript":
+        starter_code = (
+            "// Write your solution here\n"
+            "function solve(input) {\n"
+            "  // TODO: transform the input and return the answer\n"
+            "  return input.trim();\n"
+            "}\n"
+            "\n"
+            "const fs = require('fs');\n"
+            "const input = fs.readFileSync(0, 'utf8');\n"
+            "console.log(solve(input));\n"
+        )
+    elif language == "java":
+        starter_code = (
+            "import java.util.*;\n"
+            "public class Main {\n"
+            "  public static void main(String[] args) {\n"
+            "    Scanner sc = new Scanner(System.in);\n"
+            "    String input = sc.hasNextLine() ? sc.nextLine() : \"\";\n"
+            "    // TODO: transform the input and print the answer\n"
+            "    System.out.println(input.trim());\n"
+            "  }\n"
+            "}\n"
+        )
+    elif language == "c++":
+        starter_code = (
+            "#include <bits/stdc++.h>\n"
+            "using namespace std;\n"
+            "int main() {\n"
+            "  ios::sync_with_stdio(false);\n"
+            "  cin.tie(nullptr);\n"
+            "  string input;\n"
+            "  getline(cin, input);\n"
+            "  // TODO: transform the input and print the answer\n"
+            "  cout << input << '\\n';\n"
+            "}\n"
+        )
+    elif language == "c":
+        starter_code = (
+            "#include <stdio.h>\n"
+            "#include <string.h>\n"
+            "int main() {\n"
+            "  char input[256] = {0};\n"
+            "  if (fgets(input, sizeof(input), stdin)) {\n"
+            "    // TODO: transform the input and print the answer\n"
+            "    printf(\"%s\", input);\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n"
+        )
+    else:
+        starter_code = (
+            "# Write your solution here\n"
+            "def solve(text):\n"
+            "    # TODO: transform the text and return the answer\n"
+            "    return text.strip()\n"
+            "\n"
+            "if __name__ == '__main__':\n"
+            "    import sys\n"
+            "    data = sys.stdin.read()\n"
+            "    print(solve(data))\n"
+        )
+
+    answer_text = (answer or "").strip()
+    validation = [slug, "stdin", "print"]
+    if "recursion" in topic.lower() or "recursive" in answer_text.lower():
+        validation.extend(["base case", "return solve"])
+    elif "binary search" in (topic + " " + answer_text).lower():
+        validation.extend(["mid", "while", "-1"])
+    elif "loop" in (topic + " " + answer_text).lower():
+        validation.extend(["for", "while"])
+
+    return {
+        "task_key": f"{language}-{slug}",
+        "title": f"{topic[:60]} Practice",
+        "description": f"Build a small program based on the latest chat about {topic}. Use the input and produce the expected output for the sample case.",
+        "starter_code": starter_code,
+        "sample_input": "1\n",
+        "expected_output": "1",
+        "hint": "Use the chat context as your guide and keep the solution simple first.",
+        "validation_json": validation[:5],
+    }
+
+
+def generate_lab_task_from_chat(question: str, answer: str, language: str) -> dict:
+    language_key = (language or "python").strip().lower()
+    if language_key in {"js", "node"}:
+        language_key = "javascript"
+    elif language_key == "cpp":
+        language_key = "c++"
+    elif language_key not in {"python", "javascript", "java", "c", "c++"}:
+        language_key = "python"
+
+    system_prompt = (
+        "You are creating a coding lab assignment from a learner's chat. "
+        "Return strict JSON only with keys: task_key, title, description, starter_code, sample_input, expected_output, hint, validation_json. "
+        "Make the task small, practical, and directly related to the chat topic. "
+        "The starter_code should be a runnable starting point for the selected language and should include a clear TODO. "
+        "validation_json should be an array of 3 to 5 short keyword strings that can help verify the attempt. "
+        "No markdown."
+    )
+    user_prompt = (
+        f"Language: {language_key}\n"
+        f"Chat question: {question}\n"
+        f"Chat answer summary: {(answer or '')[:1200]}\n\n"
+        "Rules:\n"
+        "- Keep the program/task under 20 lines if possible\n"
+        "- Use one simple input/output example\n"
+        "- The hint should sound like a coaching hint, not the solution\n"
+        "- validation_json should focus on concepts that appear in the correct solution"
+    )
+    payload = chatgpt_json(system_prompt, user_prompt, temperature=0.35) or {}
+    fallback = _fallback_generated_task(question, answer, language_key)
+
+    def pick_text(key: str, limit: int, fallback_key: str):
+        value = str(payload.get(key, "")).strip()
+        return value[:limit] if value else fallback[fallback_key]
+
+    validation = payload.get("validation_json")
+    if not isinstance(validation, list):
+        validation = fallback["validation_json"]
+    validation_json = [str(item).strip() for item in validation if str(item).strip()][:5]
+    if not validation_json:
+        validation_json = fallback["validation_json"]
+
+    task_key = str(payload.get("task_key", "")).strip() or fallback["task_key"]
+    return {
+        "task_key": _safe_slug(task_key, fallback["task_key"]),
+        "language": language_key,
+        "title": pick_text("title", 255, "title"),
+        "description": pick_text("description", 4000, "description"),
+        "starter_code": pick_text("starter_code", 12000, "starter_code"),
+        "sample_input": pick_text("sample_input", 1000, "sample_input"),
+        "expected_output": pick_text("expected_output", 1000, "expected_output"),
+        "hint": pick_text("hint", 1000, "hint"),
+        "validation_json": validation_json,
     }
 
 

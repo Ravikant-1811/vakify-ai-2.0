@@ -61,22 +61,68 @@ def test_code_lab_runs_python(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     token = _register(client, "lab@example.com", "Lab User")
 
-    challenge = client.get(
-        "/api/lab/challenge?language=python",
+    from app.routes import lab as lab_routes
+
+    monkeypatch.setattr(
+        lab_routes,
+        "generate_lab_task_from_chat",
+        lambda question, answer, language: {
+            "task_key": "python-recursion-practice",
+            "language": "python",
+            "title": "Recursion Practice",
+            "description": "Write a tiny program inspired by the latest chat.",
+            "starter_code": (
+                "def solve(text):\n"
+                "    return text.strip()\n"
+                "\n"
+                "if __name__ == '__main__':\n"
+                "    import sys\n"
+                "    print(solve(sys.stdin.read()))\n"
+            ),
+            "sample_input": "5\n",
+            "expected_output": "5",
+            "hint": "Read from stdin and print the cleaned result.",
+            "validation_json": ["stdin", "print", "strip"],
+        },
+    )
+
+    style = client.post(
+        "/api/style/select",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"learning_style": "visual"},
+    )
+    assert style.status_code == 200
+
+    chat = client.post(
+        "/api/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "question": "Explain recursion simply",
+            "mode": "detailed",
+        },
+    )
+    assert chat.status_code == 200
+
+    task = client.get(
+        "/api/lab/task?language=python",
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert challenge.status_code == 200
-    challenge_data = challenge.get_json()
-    assert challenge_data["language"] == "python"
+    assert task.status_code == 200
+    task_data = task.get_json()
+    assert task_data["language"] == "python"
+    assert task_data["source_chat_id"]
+    assert task_data["title"] == "Recursion Practice"
 
     run = client.post(
         "/api/lab/run",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "language": "python",
-            "challenge_key": challenge_data["key"],
-            "title": challenge_data["title"],
-            "source_code": challenge_data["starter_code"],
+            "task_id": task_data["task_id"],
+            "challenge_key": task_data["task_key"],
+            "title": task_data["title"],
+            "source_code": task_data["starter_code"],
+            "stdin": task_data["sample_input"],
         },
     )
     assert run.status_code == 200
@@ -84,6 +130,15 @@ def test_code_lab_runs_python(tmp_path, monkeypatch):
     assert "stdout" in data
     assert data["submission_id"]
     assert isinstance(data["tests"], list)
+    assert data["passed_tests"] >= 1
+
+    submissions = client.get(
+        "/api/lab/submissions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert submissions.status_code == 200
+    rows = submissions.get_json()["rows"]
+    assert rows[0]["task_id"] == task_data["task_id"]
 
 
 def test_moderation_queue_is_accessible_to_admin(tmp_path, monkeypatch):
