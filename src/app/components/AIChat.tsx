@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Send, Sparkles, Copy, RotateCcw, ThumbsUp, ThumbsDown, MessageSquareText } from 'lucide-react';
+import {
+  Send,
+  Sparkles,
+  Copy,
+  RotateCcw,
+  ThumbsUp,
+  ThumbsDown,
+  Plus,
+  PanelLeftOpen,
+  Clock3,
+  Trash2,
+  PenLine,
+} from 'lucide-react';
 import { apiFetch } from '../lib/api';
 
 type ConfidenceLevel = 'High' | 'Medium' | 'Low';
@@ -90,6 +102,11 @@ export function AIChat() {
     () => [...messages].reverse().find((message) => message.role === 'assistant') || null,
     [messages],
   );
+  const activeThread = useMemo(
+    () => threads.find((thread) => thread.thread_id === activeThreadId) || null,
+    [activeThreadId, threads],
+  );
+  const hasConversation = useMemo(() => messages.some((message) => message.id !== 'starter'), [messages]);
 
   const suggestionChips = latestAssistant?.followUps?.length ? latestAssistant.followUps : starter().followUps || [];
 
@@ -255,95 +272,199 @@ export function AIChat() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] max-w-7xl mx-auto">
-      <aside className="hidden lg:flex w-72 border-r border-border bg-card p-4 flex-col gap-5">
-        <div>
-          <h3 className="text-sm text-muted-foreground mb-2">Quick Start</h3>
-          <div className="space-y-2">
-            <button onClick={() => void startNewChat()} className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors">
-              New Chat
-            </button>
-            <button onClick={() => void startNewChat()} className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors flex items-center gap-2">
-              <RotateCcw className="w-4 h-4" />
-              Reset Thread
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1">
-          <h3 className="text-sm text-muted-foreground mb-2">Suggested prompts</h3>
-          <div className="space-y-2">
-            {suggestionChips.map((prompt) => (
+    <div className="flex h-[calc(100vh-4rem)] max-w-[1700px] mx-auto gap-4 px-4 py-4">
+      <aside className="hidden lg:flex w-[330px] shrink-0 rounded-3xl border border-border/70 bg-gradient-to-b from-card to-muted/30 shadow-[0_12px_40px_-22px_rgba(15,23,42,0.45)] overflow-hidden">
+        <div className="flex h-full w-full flex-col">
+          <div className="px-5 pt-5 pb-4 border-b border-border/60 bg-background/50 backdrop-blur">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-muted-foreground">Quick Start</div>
+                <div className="text-xs text-muted-foreground mt-1">Your saved conversations</div>
+              </div>
               <button
-                key={prompt}
-                onClick={() => setInput(prompt)}
-                className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors"
+                onClick={() => void startNewChat()}
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-sm hover:opacity-90 transition-opacity"
               >
-                {prompt}
+                <Plus className="w-3.5 h-3.5" />
+                New Chat
               </button>
-            ))}
-          </div>
-        </div>
+            </div>
 
-        <div className="flex-1">
-          <h3 className="text-sm text-muted-foreground mb-2">Recent chats</h3>
-          <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
-            {threads.length ? (
-              threads.map((thread) => (
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => void startNewChat()}
+                className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-background px-3 py-3 text-sm font-medium hover:bg-muted transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Reset
+              </button>
+              <button
+                onClick={() => {
+                  if (activeThreadId) {
+                    void selectThread(activeThreadId);
+                  }
+                }}
+                className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-background px-3 py-3 text-sm font-medium hover:bg-muted transition-colors"
+              >
+                <Clock3 className="w-4 h-4" />
+                Resume
+              </button>
+            </div>
+          </div>
+
+          <div className="px-5 py-4 border-b border-border/60">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-muted-foreground">Suggested prompts</h3>
+              <PanelLeftOpen className="w-4 h-4 text-muted-foreground" />
+            </div>
+            <div className="space-y-2">
+              {suggestionChips.map((prompt) => (
                 <button
-                  key={thread.thread_id}
-                  onClick={() => void selectThread(thread.thread_id)}
-                  className={`w-full text-left px-3 py-3 rounded-xl border transition-colors ${
-                    activeThreadId === thread.thread_id
-                      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                      : 'bg-background border-border hover:bg-muted'
-                  }`}
+                  key={prompt}
+                  onClick={() => setInput(prompt)}
+                  className="w-full text-left rounded-2xl border border-transparent bg-background/70 px-4 py-3 text-sm hover:border-border hover:bg-background transition-colors"
                 >
-                  <div className="text-sm font-medium truncate">{thread.title}</div>
-                  <div className={`text-xs mt-1 line-clamp-2 ${activeThreadId === thread.thread_id ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
-                    {thread.preview || `${thread.message_count} saved message${thread.message_count === 1 ? '' : 's'}`}
-                  </div>
+                  {prompt}
                 </button>
-              ))
-            ) : (
-              <div className="text-xs text-muted-foreground px-2 py-3">No saved chats yet. Start a new thread to save history.</div>
-            )}
+              ))}
+            </div>
+          </div>
+
+          <div className="flex-1 px-5 py-4 flex flex-col min-h-0">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-muted-foreground">Recent chats</h3>
+              <span className="text-xs text-muted-foreground">{threads.length} threads</span>
+            </div>
+            <div className="space-y-2 overflow-y-auto pr-1">
+              {threads.length ? (
+                threads.map((thread) => (
+                  <button
+                    key={thread.thread_id}
+                    onClick={() => void selectThread(thread.thread_id)}
+                    className={`w-full text-left rounded-2xl border px-4 py-3 transition-all ${
+                      activeThreadId === thread.thread_id
+                        ? 'border-primary bg-primary text-primary-foreground shadow-md shadow-primary/10'
+                        : 'border-border bg-background hover:border-secondary/50 hover:shadow-sm'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold truncate">{thread.title}</div>
+                        <div className={`mt-1 text-xs ${activeThreadId === thread.thread_id ? 'text-primary-foreground/75' : 'text-muted-foreground'}`}>
+                          {thread.preview || `${thread.message_count} saved message${thread.message_count === 1 ? '' : 's'}`}
+                        </div>
+                      </div>
+                      <div className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${activeThreadId === thread.thread_id ? 'bg-white/15' : 'bg-muted text-muted-foreground'}`}>
+                        {thread.message_count}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-border bg-background/60 p-4 text-sm text-muted-foreground">
+                  No saved chats yet. Start a new thread to save history.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col">
-        <div className="border-b border-border bg-card/80 backdrop-blur px-4 py-3 flex items-center justify-between lg:hidden">
-          <div className="flex items-center gap-2 text-sm">
-            <MessageSquareText className="w-4 h-4 text-secondary" />
-            AI Chat
+      <div className="flex-1 min-w-0 flex flex-col rounded-3xl border border-border/70 bg-background shadow-[0_18px_60px_-28px_rgba(15,23,42,0.38)] overflow-hidden">
+        <div className="border-b border-border/70 bg-gradient-to-r from-card to-muted/30 backdrop-blur px-5 py-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-secondary/10 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-secondary" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold truncate">{activeThread?.title || 'AI Chat'}</h2>
+                <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                  Live
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground truncate">
+                {hasConversation
+                  ? 'Your conversation is saved and can continue later.'
+                  : 'A clean workspace for natural, context-aware conversations.'}
+              </p>
+            </div>
           </div>
-          <button onClick={() => void startNewChat()} className="text-xs text-muted-foreground hover:text-foreground">
-            Reset
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void startNewChat()}
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium hover:bg-muted transition-colors"
+            >
+              <PenLine className="w-4 h-4" />
+              New
+            </button>
+            <button
+              onClick={() => void startNewChat()}
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium hover:bg-muted transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              Clear
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-5 md:p-6 bg-[radial-gradient(circle_at_top_right,rgba(94,234,212,0.08),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.4),rgba(248,250,252,0.92))]">
+          {!hasConversation ? (
+            <div className="max-w-4xl mx-auto mb-6">
+              <div className="rounded-[28px] border border-border/70 bg-card/90 p-6 md:p-8 shadow-sm">
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-secondary/10 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-6 h-6 text-secondary" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-2xl font-semibold tracking-tight">Ask anything, naturally.</h3>
+                    <p className="mt-2 text-sm text-muted-foreground max-w-2xl">
+                      This chat keeps context, saves conversations as threads, and formats long answers so they read cleanly.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-3 md:grid-cols-3">
+                  {[
+                    'Explain a concept step by step',
+                    'Debug code and show the fix',
+                    'Give me examples or a practice task',
+                  ].map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => setInput(item)}
+                      className="rounded-2xl border border-border bg-background px-4 py-4 text-left text-sm hover:border-secondary/50 hover:shadow-sm transition-all"
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="space-y-5">
           {messages.map((message) => (
             <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               {message.role === 'assistant' ? (
-                <div className="max-w-3xl w-full">
-                  <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
+                <div className="max-w-4xl w-full">
+                  <div className="rounded-[28px] border border-border/70 bg-card/95 p-5 md:p-6 shadow-[0_12px_40px_-26px_rgba(15,23,42,0.45)]">
                     <div className="flex items-center gap-3 mb-4">
-                      <div className="w-9 h-9 rounded-full bg-secondary/10 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-2xl bg-secondary/10 flex items-center justify-center">
                         <Sparkles className="w-4 h-4 text-secondary" />
                       </div>
                       <div>
-                        <div className="text-sm font-medium">AI Assistant</div>
+                        <div className="text-sm font-semibold">AI Assistant</div>
                         <div className="text-xs text-muted-foreground">Natural conversation mode</div>
                       </div>
                     </div>
 
-                    <div className="space-y-4 text-sm leading-7">
+                    <div className="space-y-4 text-sm leading-7 text-foreground/95">
                       {renderRichContent(message.content)}
                     </div>
 
-                    <div className="flex items-center gap-3 pt-4 mt-4 border-t border-border flex-wrap">
+                    <div className="flex items-center gap-3 pt-4 mt-5 border-t border-border/70 flex-wrap">
                       <button
                         onClick={() => void copyMessage(message)}
                         className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -351,11 +472,17 @@ export function AIChat() {
                         <Copy className="w-4 h-4" />
                         {copiedId === message.id ? 'Copied' : 'Copy'}
                       </button>
-                      <button className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                      <button
+                        onClick={() => void feedback(message, 1)}
+                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      >
                         <ThumbsUp className="w-4 h-4" />
                         Helpful
                       </button>
-                      <button className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                      <button
+                        onClick={() => void feedback(message, -1)}
+                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      >
                         <ThumbsDown className="w-4 h-4" />
                         Not helpful
                       </button>
@@ -369,7 +496,7 @@ export function AIChat() {
                           <button
                             key={prompt}
                             onClick={() => void handleSend(prompt)}
-                            className="px-3 py-2 rounded-full text-xs border border-border hover:bg-muted transition-colors"
+                            className="px-3 py-2 rounded-full text-xs border border-border bg-background hover:bg-muted transition-colors"
                           >
                             {prompt}
                           </button>
@@ -379,41 +506,46 @@ export function AIChat() {
                   </div>
                 </div>
               ) : (
-                <div className="bg-primary text-primary-foreground rounded-2xl px-6 py-3 max-w-md whitespace-pre-wrap shadow-sm">
-                  {message.content}
+                <div className="max-w-[44rem] rounded-[24px] bg-primary text-primary-foreground px-5 py-4 shadow-sm">
+                  <div className="text-xs uppercase tracking-[0.2em] text-primary-foreground/70 mb-2">You</div>
+                  <div className="whitespace-pre-wrap text-[15px] leading-7">{message.content}</div>
                 </div>
               )}
             </div>
           ))}
+          </div>
         </div>
 
-        <div className="border-t border-border p-4 bg-card">
-          <div className="flex items-end gap-3">
-            <div className="flex-1">
-              <div className="text-xs text-muted-foreground mb-2">
-                Ask naturally. The assistant keeps the conversation context.
-              </div>
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void handleSend();
-                  }
-                }}
-                className="w-full px-4 py-3 rounded-xl border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
-                placeholder="Ask anything..."
-              />
+        <div className="border-t border-border/70 bg-card/95 backdrop-blur p-4 md:p-5">
+          <div className="mx-auto max-w-4xl">
+            <div className="text-xs text-muted-foreground mb-2">
+              Ask naturally. The assistant keeps the conversation context.
             </div>
-            <button
-              onClick={() => void handleSend()}
-              disabled={!input.trim() || sending}
-              className="bg-primary text-primary-foreground px-6 py-3 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
-            >
-              <Send className="w-4 h-4" />
-              {sending ? 'Thinking...' : 'Send'}
-            </button>
+            <div className="flex items-end gap-3 rounded-[28px] border border-border/70 bg-background p-3 shadow-[0_8px_30px_-22px_rgba(15,23,42,0.35)]">
+              <div className="flex-1">
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
+                  className="min-h-[56px] w-full resize-none bg-transparent px-2 py-2 text-[15px] leading-6 focus:outline-none"
+                  placeholder="Ask anything..."
+                  rows={1}
+                />
+              </div>
+              <button
+                onClick={() => void handleSend()}
+                disabled={!input.trim() || sending}
+                className="inline-flex min-w-[112px] items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-4 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" />
+                {sending ? 'Thinking...' : 'Send'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
