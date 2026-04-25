@@ -1,5 +1,4 @@
 from datetime import datetime
-import json
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -114,7 +113,7 @@ def ask_chatbot():
         history = ChatHistory(
             user_id=user_id,
             question=question,
-            response=json.dumps(result, ensure_ascii=False),
+            response=result["text"],
             response_type=result["response_type"],
             learning_style_used=effective_style,
         )

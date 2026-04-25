@@ -51,4 +51,5 @@ def test_structured_chat_response_and_history(tmp_path, monkeypatch):
     )
     assert history.status_code == 200
     rows = history.get_json()
-    assert rows[0]["response_json"]["answer"]
+    assert rows[0]["response"]
+    assert rows[0]["response_json"] is None

@@ -605,56 +605,33 @@ def generate_chat_response(
 
     base = generate_adaptive_response(question, style_key)
     history_text = _history_text(recent_history)
-    mode_hint = {
-        "concise": "Keep the answer short, direct, and actionable.",
-        "detailed": "Give a thorough but easy-to-scan explanation.",
-        "eli5": "Explain simply like I am new to the topic.",
-        "exam": "Focus on accuracy, definitions, and exam-ready phrasing.",
-    }[mode_key]
-    style_hint = {
-        "visual": "Use visual metaphors, numbered steps, and clear section names.",
-        "auditory": "Use a conversational tone and summarize key ideas clearly.",
-        "kinesthetic": "Use hands-on implementation steps and a small coding exercise.",
-    }[style_key]
 
     system_prompt = (
-        "You are Vakify's AI tutor. Return strict JSON only. "
-        "Never use markdown tables. Keep the answer grounded, educational, and concise enough for a learning app."
+        "You are a friendly, helpful chat assistant for a learning app. "
+        "Reply naturally in plain text like a normal assistant conversation. "
+        "Do not force sections, headings, templates, or structured formatting unless it helps the answer. "
+        "Keep the response concise when possible, but be complete when the question needs depth."
     )
     user_prompt = (
-        f"Question: {question}\n"
-        f"Learning style: {style_key}\n"
-        f"Response mode: {mode_key}\n"
-        f"Mode guidance: {mode_hint}\n"
-        f"Style guidance: {style_hint}\n\n"
-        f"Recent chat context:\n{history_text or 'No prior context.'}\n\n"
-        f"Reference tutor output:\n{base.get('text', '')[:2800]}\n\n"
-        "Create a helpful answer with these fields: title, summary, answer, key_points, example, code_sample, "
-        "practice, quiz_question, quiz_options, follow_up_prompts, next_step, confidence, mode, style."
+        f"User question: {question}\n"
+        f"Learning style hint: {style_key}\n"
+        f"Response tone: {mode_key}\n\n"
+        f"Recent conversation:\n{history_text or 'No prior context.'}\n\n"
+        f"Reference content from the tutor engine:\n{base.get('text', '')[:2400]}\n\n"
+        "Answer the user naturally and directly."
     )
 
-    payload = openai_json_schema(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        schema=CHAT_RESPONSE_SCHEMA,
-        name="vakify_chat_response",
-        temperature=0.35,
-    )
-    if not payload:
-        payload = _fallback_chat_response(question, style_key, mode_key, recent_history)
+    answer = chatgpt_text(system_prompt, user_prompt, temperature=0.45)
+    if not answer:
+        answer = _fallback_response(question, style_key)
 
-    payload["mode"] = mode_key
-    payload["style"] = style_key
-    payload["assets"] = base.get("assets", {})
-    payload["response_type"] = base.get("response_type", style_key)
-    payload["ai_used"] = bool(base.get("ai_used"))
-    payload["text"] = payload.get("answer") or base.get("text") or ""
-
-    if not isinstance(payload.get("key_points"), list):
-        payload["key_points"] = []
-    if not isinstance(payload.get("quiz_options"), list):
-        payload["quiz_options"] = []
-    if not isinstance(payload.get("follow_up_prompts"), list):
-        payload["follow_up_prompts"] = []
-
-    return payload
+    return {
+        "answer": answer,
+        "text": answer,
+        "response_type": base.get("response_type", style_key),
+        "ai_used": bool(base.get("ai_used")),
+        "assets": base.get("assets", {}),
+        "follow_up_prompts": _generate_prompt_suggestions(question, style_key)[:4],
+        "mode": mode_key,
+        "style": style_key,
+    }
