@@ -1,16 +1,91 @@
+import json
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError
 from app.extensions import db
-from app.models import LearningStyle, ChatHistory, Download, ChatFeedback, ModerationItem
+from app.models import (
+    LearningStyle,
+    ChatHistory,
+    ChatThread,
+    ChatThreadMessage,
+    Download,
+    ChatFeedback,
+    ModerationItem,
+)
 from app.services.chatbot_service import generate_chat_response, get_quick_prompts
 from app.services.download_service import create_download_file
 from app.services.practice_task_service import generate_practice_tasks_from_topic
 
 
 chat_bp = Blueprint("chat", __name__, url_prefix="/api/chat")
+
+
+def _truncate(text: str, limit: int) -> str:
+    return (text or "").strip()[:limit]
+
+
+def _topic_title(question: str) -> str:
+    clean = _truncate(question.replace("\n", " "), 80)
+    return clean if len(clean) <= 60 else clean[:57].rstrip() + "..."
+
+
+def _latest_thread_for_user(user_id: int) -> ChatThread | None:
+    return (
+        ChatThread.query.filter_by(user_id=user_id, is_archived=False)
+        .order_by(ChatThread.last_message_at.desc().nullslast(), ChatThread.created_at.desc())
+        .first()
+    )
+
+
+def _resolve_thread(user_id: int, thread_id: int | None, title_hint: str | None = None, create_if_missing: bool = True) -> ChatThread | None:
+    if thread_id is not None:
+        thread = ChatThread.query.filter_by(thread_id=thread_id, user_id=user_id).first()
+        if thread:
+            return thread
+        return None
+
+    thread = _latest_thread_for_user(user_id)
+    if thread:
+        return thread
+    if not create_if_missing:
+        return None
+
+    thread = ChatThread(user_id=user_id, title=title_hint or "New Chat")
+    db.session.add(thread)
+    db.session.flush()
+    return thread
+
+
+def _thread_payload(thread: ChatThread) -> dict:
+    return {
+        "thread_id": thread.thread_id,
+        "title": thread.title,
+        "preview": thread.preview,
+        "message_count": thread.message_count,
+        "is_archived": thread.is_archived,
+        "last_message_at": thread.last_message_at.isoformat() if thread.last_message_at else None,
+        "created_at": thread.created_at.isoformat(),
+        "updated_at": thread.updated_at.isoformat(),
+    }
+
+
+def _thread_history(thread_id: int, user_id: int, limit: int = 30) -> list[ChatHistory]:
+    linked_ids = [
+        row.chat_id
+        for row in (
+            ChatThreadMessage.query.filter_by(thread_id=thread_id, user_id=user_id)
+            .order_by(ChatThreadMessage.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+    ]
+    if not linked_ids:
+        return []
+    rows = ChatHistory.query.filter(ChatHistory.chat_id.in_(linked_ids)).all()
+    rows.sort(key=lambda row: row.timestamp, reverse=True)
+    return rows
 
 
 def _auto_generate_resources(user_id: int, style: str, topic: str, base_content: str) -> list[dict]:
@@ -66,6 +141,12 @@ def ask_chatbot():
     if not question:
         return jsonify({"error": "question is required"}), 400
 
+    requested_thread_id = payload.get("thread_id")
+    try:
+        requested_thread_id = int(requested_thread_id) if requested_thread_id not in {None, "", 0} else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "thread_id must be a number"}), 400
+
     style_row = LearningStyle.query.get(user_id)
     if not style_row:
         return jsonify({"error": "learning style not found"}), 400
@@ -74,12 +155,11 @@ def ask_chatbot():
     effective_style = requested_style if requested_style in {"visual", "auditory", "kinesthetic"} else style_row.learning_style
     mode = str(payload.get("mode", "detailed")).strip().lower() or "detailed"
 
-    recent_history = (
-        ChatHistory.query.filter_by(user_id=user_id)
-        .order_by(ChatHistory.timestamp.desc())
-        .limit(8)
-        .all()
-    )
+    thread = _resolve_thread(user_id, requested_thread_id, title_hint=_topic_title(question))
+    if not thread:
+        return jsonify({"error": "thread not found"}), 404
+
+    recent_history = _thread_history(thread.thread_id, user_id, limit=8)
     history_context = []
     for row in reversed(recent_history):
         history_context.append({"role": "user", "content": row.question})
@@ -118,6 +198,13 @@ def ask_chatbot():
             learning_style_used=effective_style,
         )
         db.session.add(history)
+        db.session.flush()
+        db.session.add(ChatThreadMessage(thread_id=thread.thread_id, chat_id=history.chat_id, user_id=user_id))
+        thread.message_count = (thread.message_count or 0) + 1
+        thread.last_message_at = history.timestamp
+        thread.preview = _truncate(question, 280)
+        if not thread.title or thread.title == "New Chat":
+            thread.title = _topic_title(question)
         db.session.commit()
     except SQLAlchemyError:
         db.session.rollback()
@@ -133,19 +220,85 @@ def ask_chatbot():
             "source": practice_source,
             "tasks": practice_tasks,
         }
+    result["thread_id"] = thread.thread_id
+    result["thread_title"] = thread.title
     return jsonify(result)
+
+
+@chat_bp.get("/threads")
+@jwt_required()
+def chat_threads():
+    user_id = int(get_jwt_identity())
+    threads = (
+        ChatThread.query.filter_by(user_id=user_id)
+        .order_by(ChatThread.last_message_at.desc().nullslast(), ChatThread.created_at.desc())
+        .all()
+    )
+    return jsonify(
+        {
+            "threads": [_thread_payload(thread) for thread in threads],
+            "active_thread_id": threads[0].thread_id if threads else None,
+        }
+    )
+
+
+@chat_bp.post("/threads")
+@jwt_required()
+def create_chat_thread():
+    user_id = int(get_jwt_identity())
+    payload = request.get_json(silent=True) or {}
+    title = _truncate(str(payload.get("title", "")).strip(), 200) or "New Chat"
+    thread = ChatThread(user_id=user_id, title=title)
+    db.session.add(thread)
+    db.session.commit()
+    return jsonify(_thread_payload(thread)), 201
+
+
+@chat_bp.get("/threads/<int:thread_id>/history")
+@jwt_required()
+def thread_history(thread_id: int):
+    user_id = int(get_jwt_identity())
+    thread = ChatThread.query.filter_by(thread_id=thread_id, user_id=user_id).first()
+    if not thread:
+        return jsonify({"error": "thread not found"}), 404
+    rows = _thread_history(thread_id, user_id, limit=60)
+    feedback_rows = []
+    if rows:
+        feedback_rows = ChatFeedback.query.filter(
+            ChatFeedback.user_id == user_id,
+            ChatFeedback.chat_id.in_([r.chat_id for r in rows]),
+        ).all()
+    feedback_map = {f.chat_id: {"rating": f.rating, "comment": f.comment} for f in feedback_rows}
+    return jsonify(
+        {
+            "thread": _thread_payload(thread),
+            "messages": [
+                {
+                    "chat_id": r.chat_id,
+                    "question": r.question,
+                    "response": r.response,
+                    "response_json": _safe_parse_response(r.response),
+                    "response_type": r.response_type,
+                    "learning_style_used": r.learning_style_used,
+                    "timestamp": r.timestamp.isoformat(),
+                    "feedback": feedback_map.get(r.chat_id),
+                    "thread_id": thread.thread_id,
+                }
+                for r in rows
+            ],
+        }
+    )
 
 
 @chat_bp.get("/history")
 @jwt_required()
 def chat_history():
     user_id = int(get_jwt_identity())
-    rows = (
-        ChatHistory.query.filter_by(user_id=user_id)
-        .order_by(ChatHistory.timestamp.desc())
-        .limit(30)
-        .all()
-    )
+    thread_id = request.args.get("thread_id", type=int)
+    thread = _resolve_thread(user_id, thread_id, create_if_missing=False)
+    if not thread:
+        return jsonify([])
+    rows = _thread_history(thread.thread_id, user_id, limit=30)
     feedback_rows = []
     if rows:
         feedback_rows = ChatFeedback.query.filter(
@@ -165,6 +318,8 @@ def chat_history():
                 "learning_style_used": r.learning_style_used,
                 "timestamp": r.timestamp.isoformat(),
                 "feedback": feedback_map.get(r.chat_id),
+                "thread_id": thread.thread_id,
+                "thread_title": thread.title,
             }
             for r in rows
         ]
@@ -209,6 +364,13 @@ def delete_chat_item(chat_id: int):
 def clear_history():
     user_id = int(get_jwt_identity())
     try:
+        thread_ids = [r.thread_id for r in ChatThread.query.filter_by(user_id=user_id).all()]
+        if thread_ids:
+            ChatThreadMessage.query.filter(
+                ChatThreadMessage.user_id == user_id,
+                ChatThreadMessage.thread_id.in_(thread_ids),
+            ).delete(synchronize_session=False)
+            ChatThread.query.filter(ChatThread.thread_id.in_(thread_ids)).delete(synchronize_session=False)
         chat_ids = [r.chat_id for r in ChatHistory.query.filter_by(user_id=user_id).all()]
         if chat_ids:
             ChatFeedback.query.filter(

@@ -4,6 +4,8 @@ from app.extensions import db
 from app.models import (
     ChatFeedback,
     ChatHistory,
+    ChatThread,
+    ChatThreadMessage,
     DailyTask,
     DailyTaskAttempt,
     Download,
@@ -34,6 +36,10 @@ def delete_user_with_related_data(user_id: int) -> bool:
             except OSError:
                 pass
 
+    thread_ids = [row.thread_id for row in ChatThread.query.filter_by(user_id=user_id).all()]
+    if thread_ids:
+        ChatThreadMessage.query.filter(ChatThreadMessage.thread_id.in_(thread_ids)).delete(synchronize_session=False)
+        ChatThread.query.filter(ChatThread.thread_id.in_(thread_ids)).delete(synchronize_session=False)
     ChatHistory.query.filter_by(user_id=user_id).delete()
     ChatFeedback.query.filter_by(user_id=user_id).delete()
     DailyTask.query.filter_by(user_id=user_id).delete()

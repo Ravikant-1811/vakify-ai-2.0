@@ -38,6 +38,30 @@ class ChatHistory(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class ChatThread(db.Model):
+    __tablename__ = "chat_threads"
+
+    thread_id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
+    title = db.Column(db.String(200), default="New Chat", nullable=False)
+    preview = db.Column(db.String(280), nullable=True)
+    message_count = db.Column(db.Integer, default=0, nullable=False)
+    is_archived = db.Column(db.Boolean, default=False, nullable=False)
+    last_message_at = db.Column(db.DateTime, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ChatThreadMessage(db.Model):
+    __tablename__ = "chat_thread_messages"
+
+    thread_message_id = db.Column(db.Integer, primary_key=True)
+    thread_id = db.Column(db.Integer, db.ForeignKey("chat_threads.thread_id"), nullable=False, index=True)
+    chat_id = db.Column(db.Integer, db.ForeignKey("chat_history.chat_id"), nullable=False, unique=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class ChatFeedback(db.Model):
     __tablename__ = "chat_feedback"
 

@@ -11,6 +11,17 @@ type ChatPayload = {
   response_type?: string;
   confidence?: ConfidenceLevel;
   chat_id?: number;
+  thread_id?: number;
+  thread_title?: string;
+};
+
+type ThreadSummary = {
+  thread_id: number;
+  title: string;
+  preview?: string | null;
+  message_count: number;
+  is_archived?: boolean;
+  last_message_at?: string | null;
 };
 
 interface Message {
@@ -37,56 +48,39 @@ export function AIChat() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    const loadHistory = async () => {
+    const loadThreads = async () => {
       try {
-        const rows = await apiFetch<Array<{
-          chat_id: number;
-          question: string;
-          response: string;
-          response_json?: ChatPayload | null;
-          response_type: string;
-          timestamp: string;
-        }>>('/api/chat/history');
+        const data = await apiFetch<{ threads: ThreadSummary[]; active_thread_id?: number | null }>('/api/chat/threads');
 
         if (cancelled) {
           return;
         }
 
-        const chronological = [...rows].reverse();
-        const restored: Message[] = [];
-        chronological.forEach((row) => {
-          restored.push({
-            id: `q-${row.chat_id}`,
-            role: 'user',
-            content: row.question,
-            timestamp: new Date(row.timestamp),
-            chatId: row.chat_id,
-          });
-          const parsed = row.response_json || safeParseChatPayload(row.response);
-          restored.push({
-            id: `a-${row.chat_id}`,
-            role: 'assistant',
-            content: parsed?.answer || parsed?.text || row.response || 'Assistant response',
-            confidence: parsed?.confidence || confidenceFromResponseType(row.response_type),
-            timestamp: new Date(row.timestamp),
-            chatId: row.chat_id,
-            followUps: parsed?.follow_up_prompts?.slice(0, 4) || [],
-          });
-        });
-
-        setMessages(restored.length ? restored : [starter()]);
+        setThreads(data.threads || []);
+        const preferredThreadId = data.active_thread_id || data.threads?.[0]?.thread_id || null;
+        if (preferredThreadId) {
+          await loadThreadHistory(preferredThreadId, false);
+          setActiveThreadId(preferredThreadId);
+        } else {
+          setMessages([starter()]);
+          setActiveThreadId(null);
+        }
       } catch {
         if (!cancelled) {
+          setThreads([]);
+          setActiveThreadId(null);
           setMessages([starter()]);
         }
       }
     };
 
-    void loadHistory();
+    void loadThreads();
     return () => {
       cancelled = true;
     };
@@ -98,6 +92,56 @@ export function AIChat() {
   );
 
   const suggestionChips = latestAssistant?.followUps?.length ? latestAssistant.followUps : starter().followUps || [];
+
+  const loadThreadHistory = async (threadId: number, focusThread = true) => {
+    const data = await apiFetch<{
+      thread: ThreadSummary;
+      messages: Array<{
+        chat_id: number;
+        question: string;
+        response: string;
+        response_json?: ChatPayload | null;
+        response_type: string;
+        timestamp: string;
+        feedback?: { rating: number; comment?: string | null } | null;
+      }>;
+    }>(`/api/chat/threads/${threadId}/history`);
+
+    const rows = data.messages || [];
+    const restored = buildMessagesFromRows(rows);
+    setMessages(restored.length ? restored : [starter()]);
+    setThreads((prev) =>
+      prev.map((thread) =>
+        thread.thread_id === threadId
+          ? {
+              ...thread,
+              ...data.thread,
+            }
+          : thread,
+      ),
+    );
+    if (focusThread) {
+      setActiveThreadId(threadId);
+    }
+  };
+
+  const startNewChat = async () => {
+    const thread = await apiFetch<ThreadSummary>('/api/chat/threads', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'New Chat' }),
+    });
+    setThreads((prev) => [thread, ...prev.filter((item) => item.thread_id !== thread.thread_id)]);
+    setActiveThreadId(thread.thread_id);
+    setMessages([starter()]);
+    setInput('');
+    setCopiedId(null);
+  };
+
+  const selectThread = async (threadId: number) => {
+    if (threadId === activeThreadId) return;
+    setActiveThreadId(threadId);
+    await loadThreadHistory(threadId, true);
+  };
 
   const handleSend = async (value?: string) => {
     const text = (value ?? input).trim();
@@ -115,9 +159,20 @@ export function AIChat() {
     setSending(true);
 
     try {
+      let threadId = activeThreadId;
+      if (!threadId) {
+        const createdThread = await apiFetch<ThreadSummary>('/api/chat/threads', {
+          method: 'POST',
+          body: JSON.stringify({ title: text.slice(0, 80) || 'New Chat' }),
+        });
+        threadId = createdThread.thread_id;
+        setThreads((prev) => [createdThread, ...prev.filter((item) => item.thread_id !== createdThread.thread_id)]);
+        setActiveThreadId(threadId);
+      }
+
       const response = await apiFetch<ChatPayload>('/api/chat', {
         method: 'POST',
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({ question: text, thread_id: threadId }),
       });
 
       const assistantMessage: Message = {
@@ -127,9 +182,13 @@ export function AIChat() {
         confidence: response.confidence || 'High',
         timestamp: new Date(),
         followUps: response.follow_up_prompts?.slice(0, 4) || [],
+        chatId: response.chat_id,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+      if (response.thread_id && response.thread_id !== threadId) {
+        setActiveThreadId(response.thread_id);
+      }
     } catch (error) {
       setMessages((prev) => [
         ...prev,
@@ -163,16 +222,48 @@ export function AIChat() {
     });
   };
 
+  function buildMessagesFromRows(rows: Array<{
+    chat_id: number;
+    question: string;
+    response: string;
+    response_json?: ChatPayload | null;
+    response_type: string;
+    timestamp: string;
+  }>): Message[] {
+    const chronological = [...rows].reverse();
+    const restored: Message[] = [];
+    chronological.forEach((row) => {
+      restored.push({
+        id: `q-${row.chat_id}`,
+        role: 'user',
+        content: row.question,
+        timestamp: new Date(row.timestamp),
+        chatId: row.chat_id,
+      });
+      const parsed = row.response_json || safeParseChatPayload(row.response);
+      restored.push({
+        id: `a-${row.chat_id}`,
+        role: 'assistant',
+        content: parsed?.answer || parsed?.text || row.response || 'Assistant response',
+        confidence: parsed?.confidence || confidenceFromResponseType(row.response_type),
+        timestamp: new Date(row.timestamp),
+        chatId: row.chat_id,
+        followUps: parsed?.follow_up_prompts?.slice(0, 4) || [],
+      });
+    });
+    return restored;
+  }
+
   return (
     <div className="flex h-[calc(100vh-4rem)] max-w-7xl mx-auto">
       <aside className="hidden lg:flex w-72 border-r border-border bg-card p-4 flex-col gap-5">
         <div>
           <h3 className="text-sm text-muted-foreground mb-2">Quick Start</h3>
           <div className="space-y-2">
-            <button onClick={() => setMessages([starter()])} className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors">
+            <button onClick={() => void startNewChat()} className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors">
               New Chat
             </button>
-            <button onClick={() => setMessages([starter()])} className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors flex items-center gap-2">
+            <button onClick={() => void startNewChat()} className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-muted transition-colors flex items-center gap-2">
               <RotateCcw className="w-4 h-4" />
               Reset Thread
             </button>
@@ -193,6 +284,32 @@ export function AIChat() {
             ))}
           </div>
         </div>
+
+        <div className="flex-1">
+          <h3 className="text-sm text-muted-foreground mb-2">Recent chats</h3>
+          <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
+            {threads.length ? (
+              threads.map((thread) => (
+                <button
+                  key={thread.thread_id}
+                  onClick={() => void selectThread(thread.thread_id)}
+                  className={`w-full text-left px-3 py-3 rounded-xl border transition-colors ${
+                    activeThreadId === thread.thread_id
+                      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                      : 'bg-background border-border hover:bg-muted'
+                  }`}
+                >
+                  <div className="text-sm font-medium truncate">{thread.title}</div>
+                  <div className={`text-xs mt-1 line-clamp-2 ${activeThreadId === thread.thread_id ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                    {thread.preview || `${thread.message_count} saved message${thread.message_count === 1 ? '' : 's'}`}
+                  </div>
+                </button>
+              ))
+            ) : (
+              <div className="text-xs text-muted-foreground px-2 py-3">No saved chats yet. Start a new thread to save history.</div>
+            )}
+          </div>
+        </div>
       </aside>
 
       <div className="flex-1 flex flex-col">
@@ -201,7 +318,7 @@ export function AIChat() {
             <MessageSquareText className="w-4 h-4 text-secondary" />
             AI Chat
           </div>
-          <button onClick={() => setMessages([starter()])} className="text-xs text-muted-foreground hover:text-foreground">
+          <button onClick={() => void startNewChat()} className="text-xs text-muted-foreground hover:text-foreground">
             Reset
           </button>
         </div>
