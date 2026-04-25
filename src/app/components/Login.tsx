@@ -214,8 +214,8 @@ export function Login() {
 
           {!isSignup && (
             <div className="mt-8 p-4 bg-muted/50 rounded-lg">
-              <p className="text-sm text-muted-foreground mb-2">Quick Demo Access:</p>
-              <p className="text-xs text-muted-foreground">Use any email and password, or click "Continue with Google"</p>
+              <p className="text-sm text-muted-foreground mb-2">Sign in</p>
+              <p className="text-xs text-muted-foreground">Use your own account to continue your learning progress.</p>
             </div>
           )}
         </div>

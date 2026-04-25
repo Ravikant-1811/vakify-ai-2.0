@@ -46,15 +46,6 @@ interface Message {
   followUps?: string[];
 }
 
-const starter = (): Message => ({
-  id: 'starter',
-  role: 'assistant',
-  content: 'Ask me anything. I will answer like a normal AI chat assistant and keep the conversation going.',
-  confidence: 'High',
-  timestamp: new Date(),
-  followUps: ['Explain recursion simply', 'Give me a Java example', 'Help me debug my code'],
-});
-
 export function AIChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -80,14 +71,14 @@ export function AIChat() {
           await loadThreadHistory(preferredThreadId, false);
           setActiveThreadId(preferredThreadId);
         } else {
-          setMessages([starter()]);
+          setMessages([]);
           setActiveThreadId(null);
         }
       } catch {
         if (!cancelled) {
           setThreads([]);
           setActiveThreadId(null);
-          setMessages([starter()]);
+          setMessages([]);
         }
       }
     };
@@ -108,7 +99,7 @@ export function AIChat() {
   );
   const hasConversation = useMemo(() => messages.some((message) => message.id !== 'starter'), [messages]);
 
-  const suggestionChips = latestAssistant?.followUps?.length ? latestAssistant.followUps : starter().followUps || [];
+  const suggestionChips = latestAssistant?.followUps?.length ? latestAssistant.followUps : [];
 
   const loadThreadHistory = async (threadId: number, focusThread = true) => {
     const data = await apiFetch<{
@@ -126,7 +117,7 @@ export function AIChat() {
 
     const rows = data.messages || [];
     const restored = buildMessagesFromRows(rows);
-    setMessages(restored.length ? restored : [starter()]);
+    setMessages(restored);
     setThreads((prev) =>
       prev.map((thread) =>
         thread.thread_id === threadId
@@ -149,7 +140,7 @@ export function AIChat() {
     });
     setThreads((prev) => [thread, ...prev.filter((item) => item.thread_id !== thread.thread_id)]);
     setActiveThreadId(thread.thread_id);
-    setMessages([starter()]);
+    setMessages([]);
     setInput('');
     setCopiedId(null);
   };
@@ -312,23 +303,25 @@ export function AIChat() {
             </div>
           </div>
 
-          <div className="px-5 py-4 border-b border-border/60">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-muted-foreground">Suggested prompts</h3>
-              <PanelLeftOpen className="w-4 h-4 text-muted-foreground" />
+          {suggestionChips.length ? (
+            <div className="px-5 py-4 border-b border-border/60">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-muted-foreground">Suggested prompts</h3>
+                <PanelLeftOpen className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <div className="space-y-2">
+                {suggestionChips.map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => setInput(prompt)}
+                    className="w-full text-left rounded-2xl border border-transparent bg-background/70 px-4 py-3 text-sm hover:border-border hover:bg-background transition-colors"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="space-y-2">
-              {suggestionChips.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => setInput(prompt)}
-                  className="w-full text-left rounded-2xl border border-transparent bg-background/70 px-4 py-3 text-sm hover:border-border hover:bg-background transition-colors"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
+          ) : null}
 
           <div className="flex-1 px-5 py-4 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
@@ -424,21 +417,8 @@ export function AIChat() {
                     </p>
                   </div>
                 </div>
-
-                <div className="mt-6 grid gap-3 md:grid-cols-3">
-                  {[
-                    'Explain a concept step by step',
-                    'Debug code and show the fix',
-                    'Give me examples or a practice task',
-                  ].map((item) => (
-                    <button
-                      key={item}
-                      onClick={() => setInput(item)}
-                      className="rounded-2xl border border-border bg-background px-4 py-4 text-left text-sm hover:border-secondary/50 hover:shadow-sm transition-all"
-                    >
-                      {item}
-                    </button>
-                  ))}
+                <div className="mt-5 rounded-2xl border border-dashed border-border bg-background/80 px-4 py-4 text-sm text-muted-foreground">
+                  Start typing below to begin a new conversation.
                 </div>
               </div>
             </div>

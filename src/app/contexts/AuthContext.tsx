@@ -74,8 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response = await apiFetch<Record<string, any>>('/api/auth/clerk-login', {
       method: 'POST',
       body: JSON.stringify({
-        email: 'demo.user@vakify.ai',
-        name: 'Demo User',
+        email: 'user@vakify.local',
+        name: 'Learner',
       }),
       skipAuth: true,
     });
