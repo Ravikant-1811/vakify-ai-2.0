@@ -1,4 +1,9 @@
+import sqlite3
+
+from sqlalchemy import inspect
+
 from app import create_app
+from app.extensions import db
 
 
 def _client(tmp_path, monkeypatch, admin=False):
@@ -165,3 +170,42 @@ def test_moderation_queue_is_accessible_to_admin(tmp_path, monkeypatch):
     assert queue.status_code == 200
     data = queue.get_json()
     assert "items" in data
+
+
+def test_schema_compatibility_adds_missing_task_id(tmp_path, monkeypatch):
+    db_path = tmp_path / "legacy.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE code_lab_submissions (
+                submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                language VARCHAR(20) NOT NULL,
+                challenge_key VARCHAR(80) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                source_code TEXT NOT NULL,
+                stdout TEXT,
+                stderr TEXT,
+                status VARCHAR(20) NOT NULL,
+                passed_tests INTEGER NOT NULL DEFAULT 0,
+                total_tests INTEGER NOT NULL DEFAULT 0,
+                score INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL
+            )
+            """
+        )
+        connection.commit()
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-jwt-secret")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("MODERATOR_EMAILS", "moderator@example.com")
+    monkeypatch.setenv("ADMIN_EMAILS", "")
+
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    with app.app_context():
+        inspector = inspect(db.engine)
+        column_names = [column["name"] for column in inspector.get_columns("code_lab_submissions")]
+        assert "task_id" in column_names

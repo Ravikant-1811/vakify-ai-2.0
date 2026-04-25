@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from app.config import build_runtime_config, cors_origins_from_env
 from app.extensions import db, jwt
+from app.services.schema_compat import ensure_schema_compatibility
 
 
 def create_app():
@@ -66,6 +67,7 @@ def create_app():
         from app import models
 
         db.create_all()
+        ensure_schema_compatibility(db)
         if database_uri.startswith("sqlite"):
             db.session.execute(text("PRAGMA journal_mode=WAL"))
             db.session.execute(text("PRAGMA synchronous=NORMAL"))
