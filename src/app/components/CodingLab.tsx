@@ -153,6 +153,7 @@ export function CodingLab() {
   const passedTests = tests.filter((t) => t.passed).length;
   const totalTests = tests.length;
   const passRate = totalTests > 0 ? (passedTests / totalTests) * 100 : 0;
+  const plannedChecks = task?.validation_json?.length ?? 0;
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col p-6 max-w-7xl mx-auto gap-5">
@@ -204,11 +205,24 @@ export function CodingLab() {
         </div>
 
         {task?.source_question ? (
-          <div className="mt-4 rounded-xl border border-border bg-muted/30 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Source chat</div>
-            <div className="text-sm font-medium">{task.source_question}</div>
+          <div className="mt-4 rounded-2xl border border-border bg-muted/20 p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Source chat</div>
+              <div className="text-xs text-muted-foreground">
+                {task.source_thread_id ? `Thread #${task.source_thread_id}` : 'Single message'}
+              </div>
+            </div>
+            <div className="rounded-xl border border-border bg-background p-4">
+              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">What you asked</div>
+              <div className="text-sm font-medium leading-6">{task.source_question}</div>
+            </div>
             {task.source_answer ? (
-              <p className="mt-2 text-sm text-muted-foreground line-clamp-3">{task.source_answer}</p>
+              <div className="mt-3 rounded-xl border border-dashed border-border bg-background/80 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Chat summary</div>
+                <p className="text-sm text-muted-foreground leading-6 whitespace-pre-wrap">
+                  {summarizeSourceAnswer(task.source_answer)}
+                </p>
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -301,7 +315,7 @@ export function CodingLab() {
                 Test Results
               </h3>
               <span className="text-sm text-muted-foreground">
-                {passedTests}/{totalTests} Passed
+                {totalTests > 0 ? `${passedTests}/${totalTests} Passed` : `${plannedChecks} checks ready`}
               </span>
             </div>
 
@@ -313,7 +327,7 @@ export function CodingLab() {
                 />
               </div>
               <div className="text-xs text-muted-foreground">
-                {passRate.toFixed(0)}% Tests Passing
+                {totalTests > 0 ? `${passRate.toFixed(0)}% Tests Passing` : 'Run your solution to generate live checks.'}
               </div>
             </div>
 
@@ -354,4 +368,17 @@ export function CodingLab() {
       </div>
     </div>
   );
+}
+
+function summarizeSourceAnswer(text: string) {
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return 'The chat response will be used to shape this task.';
+
+  const sentences = cleaned.split(/(?<=[.!?])\s+/);
+  const selected = sentences.slice(0, 3).join(' ');
+  return selected.length > 360 ? `${selected.slice(0, 357).trim()}...` : selected;
 }
