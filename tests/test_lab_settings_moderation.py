@@ -110,19 +110,32 @@ def test_code_lab_runs_python(tmp_path, monkeypatch):
     assert task.status_code == 200
     task_data = task.get_json()
     assert task_data["language"] == "python"
-    assert task_data["source_chat_id"]
-    assert task_data["title"] == "Recursion Practice"
+    assert task_data["task_id"] is None
+    assert task_data["source_chat_id"] is None
+
+    synced = client.post(
+        "/api/lab/task/sync",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "language": "python",
+            "chat_id": chat.get_json()["chat_id"],
+        },
+    )
+    assert synced.status_code == 200
+    synced_task = synced.get_json()
+    assert synced_task["source_chat_id"] == chat.get_json()["chat_id"]
+    assert synced_task["title"] == "Recursion Practice"
 
     run = client.post(
         "/api/lab/run",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "language": "python",
-            "task_id": task_data["task_id"],
-            "challenge_key": task_data["task_key"],
-            "title": task_data["title"],
-            "source_code": task_data["starter_code"],
-            "stdin": task_data["sample_input"],
+            "task_id": synced_task["task_id"],
+            "challenge_key": synced_task["task_key"],
+            "title": synced_task["title"],
+            "source_code": synced_task["starter_code"],
+            "stdin": synced_task["sample_input"],
         },
     )
     assert run.status_code == 200
@@ -138,7 +151,7 @@ def test_code_lab_runs_python(tmp_path, monkeypatch):
     )
     assert submissions.status_code == 200
     rows = submissions.get_json()["rows"]
-    assert rows[0]["task_id"] == task_data["task_id"]
+    assert rows[0]["task_id"] == synced_task["task_id"]
 
 
 def test_moderation_queue_is_accessible_to_admin(tmp_path, monkeypatch):

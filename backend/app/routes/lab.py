@@ -91,7 +91,21 @@ def _build_validation_tests(task: CodeLabTask | None, result: dict, source_code:
     return tests[:4]
 
 
-def _current_or_generated_task(user_id: int, language: str, force_refresh: bool = False) -> CodeLabTask:
+def _fallback_task_payload(language: str) -> dict:
+    return {
+        **get_challenge(language),
+        "task_id": None,
+        "user_id": None,
+        "source_chat_id": None,
+        "source_thread_id": None,
+        "source_question": None,
+        "source_answer": None,
+        "validation_json": [],
+        "is_active": False,
+    }
+
+
+def _current_task_for_user(user_id: int, language: str) -> CodeLabTask | None:
     language_key = (language or "python").strip().lower()
     if language_key in {"js", "javascript", "node"}:
         language_key = "javascript"
@@ -100,67 +114,11 @@ def _current_or_generated_task(user_id: int, language: str, force_refresh: bool 
     elif language_key not in {"python", "javascript", "java", "c", "c++"}:
         language_key = "python"
 
-    latest_chat = _latest_chat_for_user(user_id)
-    latest_thread_id = _latest_thread_id_for_chat(latest_chat.chat_id, user_id) if latest_chat else None
-    existing = (
+    return (
         CodeLabTask.query.filter_by(user_id=user_id, language=language_key, is_active=True)
         .order_by(CodeLabTask.updated_at.desc())
         .first()
     )
-    if (
-        existing
-        and not force_refresh
-        and (
-            existing.source_chat_id == (latest_chat.chat_id if latest_chat else None)
-            or latest_chat is None
-        )
-    ):
-        return existing
-
-    if latest_chat:
-        generated = generate_lab_task_from_chat(latest_chat.question, latest_chat.response, language_key)
-        task = CodeLabTask(
-            user_id=user_id,
-            language=generated["language"],
-            task_key=generated["task_key"],
-            title=generated["title"],
-            description=generated["description"],
-            starter_code=generated["starter_code"],
-            sample_input=generated["sample_input"],
-            expected_output=generated["expected_output"],
-            hint=generated["hint"],
-            source_chat_id=latest_chat.chat_id,
-            source_thread_id=latest_thread_id,
-            source_question=latest_chat.question,
-            source_answer=latest_chat.response[:4000],
-            validation_json=generated["validation_json"],
-            is_active=True,
-        )
-    else:
-        fallback = get_challenge(language_key)
-        task = CodeLabTask(
-            user_id=user_id,
-            language=language_key,
-            task_key=fallback["key"],
-            title=fallback["title"],
-            description=fallback["description"],
-            starter_code=fallback["starter_code"],
-            sample_input=fallback["sample_input"],
-            expected_output=fallback["expected_output"],
-            hint=fallback["hint"],
-            source_chat_id=None,
-            source_thread_id=None,
-            source_question=None,
-            source_answer=None,
-            validation_json=["compile", "execute"],
-            is_active=True,
-        )
-
-    if existing:
-        existing.is_active = False
-    db.session.add(task)
-    db.session.commit()
-    return task
 
 
 @lab_bp.get("/challenges")
@@ -181,9 +139,8 @@ def challenge():
 def current_task():
     user_id = int(get_jwt_identity())
     language = (request.args.get("language") or "python").strip().lower()
-    force_refresh = str(request.args.get("refresh", "")).strip().lower() in {"1", "true", "yes"}
-    task = _current_or_generated_task(user_id, language, force_refresh=force_refresh)
-    return jsonify(_serialize_task(task))
+    task = _current_task_for_user(user_id, language)
+    return jsonify(_serialize_task(task) if task else _fallback_task_payload(language))
 
 
 @lab_bp.post("/task/sync")
@@ -192,7 +149,40 @@ def sync_task_from_chat():
     user_id = int(get_jwt_identity())
     payload = request.get_json(silent=True) or {}
     language = str(payload.get("language", "python")).strip().lower()
-    task = _current_or_generated_task(user_id, language, force_refresh=True)
+    try:
+        chat_id = int(payload.get("chat_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "chat_id is required"}), 400
+
+    chat = ChatHistory.query.filter_by(chat_id=chat_id, user_id=user_id).first()
+    if not chat:
+        return jsonify({"error": "chat not found"}), 404
+
+    thread_id = _latest_thread_id_for_chat(chat.chat_id, user_id)
+    generated = generate_lab_task_from_chat(chat.question, chat.response, language)
+    existing = _current_task_for_user(user_id, generated["language"])
+    if existing:
+        existing.is_active = False
+
+    task = CodeLabTask(
+        user_id=user_id,
+        language=generated["language"],
+        task_key=generated["task_key"],
+        title=generated["title"],
+        description=generated["description"],
+        starter_code=generated["starter_code"],
+        sample_input=generated["sample_input"],
+        expected_output=generated["expected_output"],
+        hint=generated["hint"],
+        source_chat_id=chat.chat_id,
+        source_thread_id=thread_id,
+        source_question=chat.question,
+        source_answer=chat.response[:4000],
+        validation_json=generated["validation_json"],
+        is_active=True,
+    )
+    db.session.add(task)
+    db.session.commit()
     return jsonify(_serialize_task(task))
 
 

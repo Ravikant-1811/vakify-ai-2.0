@@ -9,11 +9,12 @@ import {
   RefreshCcw,
   Database,
   MessageSquareText,
+  ChevronDown,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 
 type LabTask = {
-  task_id: number;
+  task_id?: number | null;
   language: string;
   task_key: string;
   title: string;
@@ -45,6 +46,21 @@ type RunResponse = {
   submission_id?: number;
 };
 
+type ThreadSummary = {
+  thread_id: number;
+  title: string;
+  preview?: string | null;
+  message_count: number;
+  last_message_at?: string | null;
+};
+
+type ThreadHistoryItem = {
+  chat_id: number;
+  question: string;
+  response: string;
+  timestamp: string;
+};
+
 const languages = [
   { id: 'python', name: 'Python' },
   { id: 'javascript', name: 'JavaScript' },
@@ -63,6 +79,12 @@ export function CodingLab() {
   const [running, setRunning] = useState(false);
   const [loadingTask, setLoadingTask] = useState(false);
   const [syncingTask, setSyncingTask] = useState(false);
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  const [threadMessages, setThreadMessages] = useState<ThreadHistoryItem[]>([]);
+  const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
+  const selectedThread = threads.find((thread) => thread.thread_id === selectedThreadId) || null;
+  const selectedChat = threadMessages.find((message) => message.chat_id === selectedChatId) || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -90,18 +112,84 @@ export function CodingLab() {
       }
     };
 
+    const loadThreads = async () => {
+      try {
+        const data = await apiFetch<{ threads: ThreadSummary[]; active_thread_id?: number | null }>('/api/chat/threads');
+        if (cancelled) return;
+        setThreads(data.threads || []);
+        setSelectedThreadId((current) => {
+          if (!data.threads?.length) return null;
+          if (current && data.threads.some((thread) => thread.thread_id === current)) {
+            return current;
+          }
+          return data.active_thread_id ?? data.threads[0]?.thread_id ?? null;
+        });
+      } catch {
+        if (!cancelled) {
+          setThreads([]);
+        }
+      }
+    };
+
     void loadTask();
+    void loadThreads();
     return () => {
       cancelled = true;
     };
   }, [selectedLanguage]);
 
-  const refreshFromChat = async () => {
+  useEffect(() => {
+    const loadThreadMessages = async () => {
+      if (!selectedThreadId) {
+        setThreadMessages([]);
+        setSelectedChatId(null);
+        return;
+      }
+      try {
+        const data = await apiFetch<{ messages: ThreadHistoryItem[] }>(`/api/chat/threads/${selectedThreadId}/history`);
+        const rows = data.messages || [];
+        setThreadMessages(rows);
+        setSelectedChatId(rows[0]?.chat_id || null);
+      } catch {
+        setThreadMessages([]);
+        setSelectedChatId(null);
+      }
+    };
+
+    void loadThreadMessages();
+  }, [selectedThreadId]);
+
+  useEffect(() => {
+    const taskKey = task?.task_key || task?.task_id || 'base';
+    const storageKey = `vakify.lab.draft.${selectedLanguage}.${taskKey}`;
+    const saved = window.localStorage.getItem(storageKey);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as { code?: string; stdin?: string };
+        setCode(typeof parsed.code === 'string' ? parsed.code : task?.starter_code || '');
+        setStdin(typeof parsed.stdin === 'string' ? parsed.stdin : task?.sample_input || '');
+        return;
+      } catch {
+        // fall back to starter code below
+      }
+    }
+    setCode(task?.starter_code || '');
+    setStdin(task?.sample_input || '');
+  }, [selectedLanguage, task?.task_id, task?.task_key, task?.starter_code, task?.sample_input]);
+
+  useEffect(() => {
+    const taskKey = task?.task_key || task?.task_id || 'base';
+    const storageKey = `vakify.lab.draft.${selectedLanguage}.${taskKey}`;
+    window.localStorage.setItem(storageKey, JSON.stringify({ code, stdin }));
+  }, [code, stdin, selectedLanguage, task?.task_id, task?.task_key]);
+
+  const syncSelectedChat = async () => {
+    if (!selectedChatId) return;
     setSyncingTask(true);
     try {
       const data = await apiFetch<LabTask>('/api/lab/task/sync', {
         method: 'POST',
-        body: JSON.stringify({ language: selectedLanguage }),
+        body: JSON.stringify({ language: selectedLanguage, chat_id: selectedChatId }),
       });
       setTask(data);
       setCode(data.starter_code || '');
@@ -156,34 +244,36 @@ export function CodingLab() {
   const plannedChecks = task?.validation_json?.length ?? 0;
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col p-6 max-w-7xl mx-auto gap-5">
-      <div className="flex items-end justify-between gap-4">
+    <div className="min-h-[calc(100vh-4rem)] flex flex-col p-6 max-w-7xl mx-auto gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl mb-2">Coding Lab</h1>
-          <p className="text-muted-foreground">
-            Practice coding with instant feedback, live input, and tasks auto-generated from your chat history.
+          <p className="text-muted-foreground max-w-4xl">
+            Practice coding with instant feedback, live input, and tasks you choose from your chat history.
           </p>
         </div>
-        <button
-          onClick={() => void refreshFromChat()}
-          disabled={syncingTask || loadingTask}
-          className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          <RefreshCcw className={`w-4 h-4 ${syncingTask ? 'animate-spin' : ''}`} />
-          Sync from Chat
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void syncSelectedChat()}
+            disabled={syncingTask || loadingTask || !selectedChatId}
+            className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCcw className={`w-4 h-4 ${syncingTask ? 'animate-spin' : ''}`} />
+            Sync selected message
+          </button>
+        </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm text-muted-foreground flex items-center gap-2">
+      <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm text-muted-foreground flex items-center gap-2 uppercase tracking-[0.18em]">
               <MessageSquareText className="w-4 h-4" />
               Current Challenge
             </div>
-            <div className="text-lg font-semibold mt-1">{task?.title || 'Loading task...'}</div>
-            <p className="mt-2 text-sm text-muted-foreground max-w-4xl">
-              {task?.description || 'The lab will populate with the latest task generated from your chat context.'}
+            <div className="text-2xl font-semibold mt-2">{task?.title || 'Loading task...'}</div>
+            <p className="mt-2 text-sm text-muted-foreground max-w-4xl leading-6">
+              {task?.description || 'Start by selecting a chat message and syncing it into the lab.'}
             </p>
           </div>
           <div className="flex flex-col items-end gap-2 text-sm text-muted-foreground">
@@ -191,48 +281,117 @@ export function CodingLab() {
               Language: {selectedLanguage}
             </div>
             {task?.source_chat_id ? (
-              <div className="inline-flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-primary">
                 <Database className="w-4 h-4" />
-                Auto-synced from chat #{task.source_chat_id}
+                Synced from chat #{task.source_chat_id}
               </div>
             ) : (
-              <div className="inline-flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-muted-foreground">
                 <Database className="w-4 h-4" />
-                Fallback database task
+                Default task
               </div>
             )}
           </div>
         </div>
 
-        {task?.source_question ? (
-          <div className="mt-4 rounded-2xl border border-border bg-muted/20 p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Source chat</div>
-              <div className="text-xs text-muted-foreground">
-                {task.source_thread_id ? `Thread #${task.source_thread_id}` : 'Single message'}
+        <div className="mt-5 grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] gap-4">
+          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <div className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Manual sync</div>
+                <div className="text-sm text-muted-foreground mt-1">
+                  Select a thread and a message. Nothing is pulled into the lab until you click sync.
+                </div>
+              </div>
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="block">
+                <span className="block text-xs uppercase tracking-[0.22em] text-muted-foreground mb-2">Chat thread</span>
+                <select
+                  value={selectedThreadId ?? ''}
+                  onChange={(event) => setSelectedThreadId(event.target.value ? Number(event.target.value) : null)}
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="">Choose a thread</option>
+                  {threads.map((thread) => (
+                    <option key={thread.thread_id} value={thread.thread_id}>
+                      {thread.title} ({thread.message_count} msgs)
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="block text-xs uppercase tracking-[0.22em] text-muted-foreground mb-2">Chat message</span>
+                <select
+                  value={selectedChatId ?? ''}
+                  onChange={(event) => setSelectedChatId(event.target.value ? Number(event.target.value) : null)}
+                  disabled={!threadMessages.length}
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
+                >
+                  <option value="">{threadMessages.length ? 'Choose a message' : 'No messages in this thread'}</option>
+                  {threadMessages.map((message) => (
+                    <option key={message.chat_id} value={message.chat_id}>
+                      #{message.chat_id} - {message.question.slice(0, 64)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-dashed border-border bg-background p-4">
+              <div className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Selected message</div>
+              <div className="mt-2 text-sm font-medium leading-6">
+                {selectedChat?.question || 'Pick a thread and message to preview it here.'}
+              </div>
+              <div className="mt-3 rounded-xl bg-muted/40 p-3 text-sm text-muted-foreground leading-6 max-h-40 overflow-auto">
+                {selectedChat ? summarizeSourceAnswer(selectedChat.response) : 'Your chosen chat response preview will appear here.'}
+              </div>
+              <div className="mt-3 text-xs text-muted-foreground">
+                {selectedThread ? `Selected thread: ${selectedThread.title}` : 'No thread selected yet.'}
               </div>
             </div>
-            <div className="rounded-xl border border-border bg-background p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">What you asked</div>
-              <div className="text-sm font-medium leading-6">{task.source_question}</div>
-            </div>
-            {task.source_answer ? (
-              <div className="mt-3 rounded-xl border border-dashed border-border bg-background/80 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Chat summary</div>
-                <p className="text-sm text-muted-foreground leading-6 whitespace-pre-wrap">
-                  {summarizeSourceAnswer(task.source_answer)}
-                </p>
-              </div>
-            ) : null}
           </div>
-        ) : null}
+
+          <div className="rounded-2xl border border-border bg-background p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Task source</div>
+                <div className="text-sm mt-1 text-muted-foreground">
+                  {task?.source_question
+                    ? 'This task was built from the synced chat message.'
+                    : 'This task is the default challenge until you sync a message.'}
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 space-y-3">
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">What you asked</div>
+                <div className="text-sm font-medium leading-6">
+                  {task?.source_question || 'No chat synced yet.'}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Task hint</div>
+                <div className="text-sm text-muted-foreground leading-6">
+                  {task?.hint || 'Sync a chat message to generate a tailored practice task.'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
           <div className="rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
             Hint: {task?.hint || 'Use the lab input to test your solution.'}
           </div>
           <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-            {task?.task_key || 'auto-generated-task'}
+            {task?.task_key || 'default-task'}
+          </div>
+          <div className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+            {task?.source_chat_id ? `Chat #${task.source_chat_id}` : 'No chat synced'}
           </div>
         </div>
       </div>
@@ -262,7 +421,7 @@ export function CodingLab() {
         </button>
       </div>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-0">
+      <div className="flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.85fr)] gap-4 min-h-0">
         <div className="flex flex-col gap-4 min-h-0">
           <div className="flex flex-col bg-card border border-border rounded-2xl overflow-hidden min-h-0 shadow-sm">
             <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
@@ -275,7 +434,7 @@ export function CodingLab() {
             <textarea
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              className="flex-1 min-h-[420px] p-4 font-mono text-sm bg-primary/5 resize-none focus:outline-none"
+              className="flex-1 min-h-[640px] p-5 font-mono text-sm leading-6 bg-primary/5 resize-none focus:outline-none"
               spellCheck={false}
             />
           </div>
@@ -291,19 +450,19 @@ export function CodingLab() {
             <textarea
               value={stdin}
               onChange={(e) => setStdin(e.target.value)}
-              className="min-h-[120px] p-4 font-mono text-sm bg-muted/20 resize-none focus:outline-none"
+              className="min-h-[180px] p-5 font-mono text-sm leading-6 bg-muted/20 resize-none focus:outline-none"
               placeholder={task?.sample_input ? 'Edit the sample input or paste your own test data...' : 'Enter stdin for your program...'}
             />
           </div>
         </div>
 
         <div className="flex flex-col gap-4 min-h-0">
-          <div className="flex-1 bg-card border border-border rounded-2xl overflow-hidden flex flex-col shadow-sm">
+          <div className="flex-1 bg-card border border-border rounded-2xl overflow-hidden flex flex-col shadow-sm min-h-[320px]">
             <div className="flex items-center gap-2 p-4 border-b border-border bg-muted/30">
               <Terminal className="w-5 h-5 text-secondary" />
               <h3>Output</h3>
             </div>
-            <div className="flex-1 p-4 font-mono text-sm bg-muted/20 overflow-auto whitespace-pre-wrap min-h-[220px]">
+            <div className="flex-1 p-4 font-mono text-sm bg-muted/20 overflow-auto whitespace-pre-wrap min-h-[280px]">
               {output || 'Click "Run Code" to see output...'}
             </div>
           </div>
