@@ -9,65 +9,41 @@ from urllib.parse import quote
 
 
 def _fallback_response(question: str, style: str) -> str:
-    topic = question.strip().rstrip("?") or "Java concept"
+    topic = question.strip().rstrip("?") or "that topic"
     words = [w for w in re.findall(r"[A-Za-z][A-Za-z0-9+#-]{2,}", topic) if w.lower() not in {"what", "how", "can", "for", "and", "the", "with", "java", "does"}]
-    focus = words[0] if words else "core concept"
-    support = words[1] if len(words) > 1 else "implementation"
+    focus = words[0] if words else "the idea"
 
     style_hint = {
-        "visual": "Use a visual flow map and structured checkpoints while studying.",
-        "auditory": "Read each section out loud and record a 60-second summary.",
-        "kinesthetic": "Implement each step directly in code and test immediately.",
-    }.get(style, "Apply this concept with one practical exercise.")
+        "visual": "I can also turn it into a diagram or a step map if you want.",
+        "auditory": "I can explain it in a more conversational way if that helps.",
+        "kinesthetic": "I can give you a hands-on example or quick practice task too.",
+    }.get(style, "I can also show an example or a practice task if you want.")
 
     return (
-        f"1) Concept Overview\n"
-        f"{topic} is mainly about understanding {focus} and applying it correctly during {support}. "
-        "The goal is to get predictable behavior and avoid runtime confusion.\n\n"
-        f"2) Step-by-Step Explanation\n"
-        f"Step 1: Identify where {focus} appears in your code flow.\n"
-        f"Step 2: Define the expected input/output around {support}.\n"
-        "Step 3: Implement logic in small methods so each part is testable.\n"
-        "Step 4: Add validation/error handling for edge cases.\n"
-        "Step 5: Run normal + edge + invalid tests and adjust.\n\n"
-        f"3) Real-World Example\n"
-        f"In a student portal, {topic.lower()} can be used while processing grades, login input, or fee records "
-        "so users get clear output instead of application crashes.\n\n"
-        f"4) Common Mistakes\n"
-        "- Writing everything in one large method\n"
-        "- Ignoring invalid input paths\n"
-        "- Not testing edge cases before final submission\n"
-        "- Using generic handling without specific user messages\n\n"
-        f"5) Quick Revision Summary\n"
-        f"Remember: understand {focus}, implement in small steps, validate input, and test failures intentionally.\n\n"
-        f"6) Next Practice Task\n"
-        f"Build a mini Java program on '{topic}' with at least 2 valid test cases and 1 failure case. "
+        f"{topic} is mainly about understanding {focus} and using it in the right place. "
+        f"The simplest way to approach it is to break the idea into small pieces, test one part at a time, "
+        f"and check the edge cases before you move on. "
+        f"For a real project, that usually means writing a small example, running it, and then improving it step by step. "
         f"{style_hint}"
     )
 
 
 def _generate_chatgpt_explanation(question: str, style: str) -> str | None:
     style_prompt = {
-        "visual": "Use strong structure, visual wording, and flow-oriented sections.",
+        "visual": "Use visual wording when helpful, but keep the reply natural and conversational.",
         "auditory": "Use conversational spoken style with clear transitions and natural pacing.",
-        "kinesthetic": "Use hands-on language with concrete implementation steps and mini tasks.",
+        "kinesthetic": "Use hands-on language with concrete implementation steps when useful.",
     }
     system_prompt = (
-        "You are an adaptive tutor. Return detailed plain-text responses only. "
-        "Do not use markdown tables. No code fences. "
-        "Always include these 6 sections in order: "
-        "1) Concept Overview "
-        "2) Step-by-Step Explanation "
-        "3) Real-World Example "
-        "4) Common Mistakes "
-        "5) Quick Revision Summary "
-        "6) Next Practice Task."
+        "You are a friendly AI chat assistant for learners. Reply naturally in plain text. "
+        "Do not force sections, headings, or templates. "
+        "Be helpful, concise when possible, and expand only when the user needs depth."
     )
     user_prompt = (
         f"Question: {question}\n"
         f"Learning style: {style}\n"
         f"Instruction: {style_prompt.get(style, '')}\n"
-        "Make each section clear and detailed but concise enough for quick study."
+        "Answer in a natural chat style."
     )
     return chatgpt_text(system_prompt, user_prompt, temperature=0.45)
 

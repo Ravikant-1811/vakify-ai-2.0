@@ -222,7 +222,9 @@ export function AIChat() {
                       </div>
                     </div>
 
-                    <div className="whitespace-pre-wrap text-sm leading-7">{message.content}</div>
+                    <div className="space-y-4 text-sm leading-7">
+                      {renderRichContent(message.content)}
+                    </div>
 
                     <div className="flex items-center gap-3 pt-4 mt-4 border-t border-border flex-wrap">
                       <button
@@ -300,6 +302,232 @@ export function AIChat() {
       </div>
     </div>
   );
+}
+
+function renderRichContent(content: string) {
+  const blocks = parseBlocks(content);
+  return blocks.map((block, index) => {
+    if (block.type === 'heading') {
+      return (
+        <div key={index} className="text-base font-semibold text-foreground">
+          {renderInline(block.text)}
+        </div>
+      );
+    }
+
+    if (block.type === 'code') {
+      return (
+        <pre key={index} className="rounded-xl bg-slate-950 text-slate-50 p-4 overflow-x-auto text-xs leading-6">
+          <code>{block.text}</code>
+        </pre>
+      );
+    }
+
+    if (block.type === 'quote') {
+      return (
+        <div key={index} className="border-l-4 border-secondary bg-secondary/5 rounded-r-xl p-4 text-muted-foreground">
+          {renderInline(block.text)}
+        </div>
+      );
+    }
+
+    if (block.type === 'list') {
+      return (
+        <ul key={index} className="space-y-2">
+          {block.items.map((item, itemIndex) => (
+            <li key={itemIndex} className="flex gap-3">
+              <span className="mt-2 h-1.5 w-1.5 rounded-full bg-secondary flex-shrink-0" />
+              <span>{renderInline(item)}</span>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    if (block.type === 'ordered') {
+      return (
+        <ol key={index} className="space-y-3 pl-5 list-decimal">
+          {block.items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInline(item)}</li>
+          ))}
+        </ol>
+      );
+    }
+
+    if (block.type === 'table') {
+      return (
+        <div key={index} className="overflow-x-auto rounded-xl border border-border">
+          <table className="min-w-full text-sm">
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={rowIndex} className={rowIndex === 0 ? 'bg-muted/60 font-medium' : 'border-t border-border'}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} className="px-4 py-3 align-top">
+                      {renderInline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return (
+      <p key={index} className="whitespace-pre-wrap">
+        {renderInline(block.text)}
+      </p>
+    );
+  });
+}
+
+function renderInline(text: string) {
+  const html = escapeHtml(text)
+    .replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em]">$1</code>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\[(.*?)\]\((https?:\/\/[^\s)]+)\)/g, '<a class="text-secondary underline" href="$2" target="_blank" rel="noreferrer">$1</a>');
+
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function parseBlocks(content: string): Array<
+  | { type: 'paragraph'; text: string }
+  | { type: 'heading'; text: string }
+  | { type: 'quote'; text: string }
+  | { type: 'list'; items: string[] }
+  | { type: 'ordered'; items: string[] }
+  | { type: 'code'; text: string }
+  | { type: 'table'; rows: string[][] }
+> {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const blocks: Array<any> = [];
+  let buffer: string[] = [];
+  let codeBuffer: string[] | null = null;
+  let listBuffer: string[] = [];
+  let orderedBuffer: string[] = [];
+  let tableBuffer: string[] = [];
+
+  const flushParagraph = () => {
+    const text = buffer.join(' ').trim();
+    if (text) blocks.push({ type: 'paragraph', text });
+    buffer = [];
+  };
+  const flushList = () => {
+    if (listBuffer.length) blocks.push({ type: 'list', items: listBuffer });
+    listBuffer = [];
+  };
+  const flushOrdered = () => {
+    if (orderedBuffer.length) blocks.push({ type: 'ordered', items: orderedBuffer });
+    orderedBuffer = [];
+  };
+  const flushTable = () => {
+    if (tableBuffer.length >= 2) {
+      const rows = tableBuffer.map((row) =>
+        row
+          .split('|')
+          .map((cell) => cell.trim())
+          .filter(Boolean),
+      );
+      blocks.push({ type: 'table', rows });
+    }
+    tableBuffer = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+
+    if (line.startsWith('```')) {
+      if (codeBuffer) {
+        blocks.push({ type: 'code', text: codeBuffer.join('\n') });
+        codeBuffer = null;
+      } else {
+        flushParagraph();
+        flushList();
+        flushOrdered();
+        flushTable();
+        codeBuffer = [];
+      }
+      continue;
+    }
+
+    if (codeBuffer) {
+      codeBuffer.push(rawLine);
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushParagraph();
+      flushList();
+      flushOrdered();
+      flushTable();
+      continue;
+    }
+
+    if (/^#{1,3}\s+/.test(line)) {
+      flushParagraph();
+      flushList();
+      flushOrdered();
+      flushTable();
+      blocks.push({ type: 'heading', text: line.replace(/^#{1,3}\s+/, '').trim() });
+      continue;
+    }
+
+    if (/^>\s+/.test(line)) {
+      flushParagraph();
+      flushList();
+      flushOrdered();
+      flushTable();
+      blocks.push({ type: 'quote', text: line.replace(/^>\s+/, '').trim() });
+      continue;
+    }
+
+    if (/^(\-|\*|•)\s+/.test(line)) {
+      flushParagraph();
+      flushOrdered();
+      flushTable();
+      listBuffer.push(line.replace(/^(\-|\*|•)\s+/, '').trim());
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      flushParagraph();
+      flushList();
+      flushTable();
+      orderedBuffer.push(line.replace(/^\d+\.\s+/, '').trim());
+      continue;
+    }
+
+    if (line.includes('|') && line.split('|').length > 2) {
+      flushParagraph();
+      flushList();
+      flushOrdered();
+      tableBuffer.push(line);
+      continue;
+    }
+
+    buffer.push(line);
+  }
+
+  if (codeBuffer) {
+    blocks.push({ type: 'code', text: codeBuffer.join('\n') });
+  }
+  flushParagraph();
+  flushList();
+  flushOrdered();
+  flushTable();
+
+  return blocks.length ? blocks : [{ type: 'paragraph', text: content }];
 }
 
 function safeParseChatPayload(raw: string): ChatPayload | null {
