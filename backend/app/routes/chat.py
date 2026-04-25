@@ -1,11 +1,12 @@
 from datetime import datetime
+import json
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError
 from app.extensions import db
 from app.models import LearningStyle, ChatHistory, Download, ChatFeedback, ModerationItem
-from app.services.chatbot_service import generate_adaptive_response, get_quick_prompts
+from app.services.chatbot_service import generate_chat_response, get_quick_prompts
 from app.services.download_service import create_download_file
 from app.services.practice_task_service import generate_practice_tasks_from_topic
 
@@ -57,7 +58,7 @@ def _auto_generate_resources(user_id: int, style: str, topic: str, base_content:
     return resources
 
 
-@chat_bp.post("/")
+@chat_bp.route("", methods=["POST"], strict_slashes=False)
 @jwt_required()
 def ask_chatbot():
     user_id = int(get_jwt_identity())
@@ -72,8 +73,26 @@ def ask_chatbot():
 
     requested_style = str(payload.get("style_override", "")).strip().lower()
     effective_style = requested_style if requested_style in {"visual", "auditory", "kinesthetic"} else style_row.learning_style
+    mode = str(payload.get("mode", "detailed")).strip().lower() or "detailed"
 
-    result = generate_adaptive_response(question, effective_style)
+    recent_history = (
+        ChatHistory.query.filter_by(user_id=user_id)
+        .order_by(ChatHistory.timestamp.desc())
+        .limit(8)
+        .all()
+    )
+    history_context = []
+    for row in reversed(recent_history):
+        history_context.append({"role": "user", "content": row.question})
+        parsed = _safe_parse_response(row.response)
+        history_context.append(
+            {
+                "role": "assistant",
+                "content": str((parsed or {}).get("answer") or row.response or "")[:500],
+            }
+        )
+
+    result = generate_chat_response(question, effective_style, mode, history_context)
     practice_tasks, practice_source = generate_practice_tasks_from_topic(question, count=3, allow_ai=True)
     audio_download_id = None
     try:
@@ -95,7 +114,7 @@ def ask_chatbot():
         history = ChatHistory(
             user_id=user_id,
             question=question,
-            response=result["text"],
+            response=json.dumps(result, ensure_ascii=False),
             response_type=result["response_type"],
             learning_style_used=effective_style,
         )
@@ -142,6 +161,7 @@ def chat_history():
                 "chat_id": r.chat_id,
                 "question": r.question,
                 "response": r.response,
+                "response_json": _safe_parse_response(r.response),
                 "response_type": r.response_type,
                 "learning_style_used": r.learning_style_used,
                 "timestamp": r.timestamp.isoformat(),
@@ -150,6 +170,14 @@ def chat_history():
             for r in rows
         ]
     )
+
+
+def _safe_parse_response(raw: str):
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
 
 
 @chat_bp.get("/suggestions")

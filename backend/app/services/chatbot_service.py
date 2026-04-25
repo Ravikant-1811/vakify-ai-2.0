@@ -1,9 +1,10 @@
+import json
 import random
 import re
 from urllib.parse import quote_plus
 import os
 
-from app.services.openai_service import chatgpt_json, chatgpt_text, generate_image_data_url
+from app.services.openai_service import chatgpt_json, chatgpt_text, generate_image_data_url, openai_json_schema
 from urllib.parse import quote
 
 
@@ -512,3 +513,148 @@ def generate_adaptive_response(question: str, style: str) -> dict:
             "suggested_downloads": ["task_sheet", "solution"],
         },
     }
+
+
+CHAT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "answer": {"type": "string"},
+        "key_points": {"type": "array", "items": {"type": "string"}},
+        "example": {"type": "string"},
+        "code_sample": {"type": "string"},
+        "practice": {"type": "string"},
+        "quiz_question": {"type": "string"},
+        "quiz_options": {"type": "array", "items": {"type": "string"}},
+        "follow_up_prompts": {"type": "array", "items": {"type": "string"}},
+        "next_step": {"type": "string"},
+        "confidence": {"type": "string"},
+        "mode": {"type": "string"},
+        "style": {"type": "string"},
+    },
+    "required": [
+        "title",
+        "summary",
+        "answer",
+        "key_points",
+        "example",
+        "code_sample",
+        "practice",
+        "quiz_question",
+        "quiz_options",
+        "follow_up_prompts",
+        "next_step",
+        "confidence",
+        "mode",
+        "style",
+    ],
+    "additionalProperties": False,
+}
+
+
+def _history_text(recent_history: list[dict] | None) -> str:
+    rows = recent_history or []
+    lines = []
+    for item in rows[-8:]:
+        role = str(item.get("role", "")).strip().lower()
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        lines.append(f"{role.upper()}: {content[:500]}")
+    return "\n".join(lines)
+
+
+def _fallback_chat_response(question: str, style: str, mode: str, recent_history: list[dict] | None = None) -> dict:
+    base = _fallback_response(question, style)
+    title = _safe_label(question or "Conversation", 40)
+    key_points = [line.strip("- ").strip() for line in base.splitlines() if line.strip()][:5]
+    if not key_points:
+        key_points = ["Clarify the goal", "Break the problem into steps", "Test with edge cases"]
+    return {
+        "title": title,
+        "summary": f"A {mode} response for {question.strip() or 'your topic'}.",
+        "answer": base,
+        "key_points": key_points[:5],
+        "example": f"For {question.strip() or 'this topic'}, apply the idea to a small real-world workflow.",
+        "code_sample": "",
+        "practice": f"Write one tiny exercise for {question.strip() or 'this topic'} and solve it from scratch.",
+        "quiz_question": f"What is the main idea behind {question.strip() or 'this topic'}?",
+        "quiz_options": ["Identify the concept", "Ignore edge cases", "Skip testing"],
+        "follow_up_prompts": _generate_prompt_suggestions(question, style)[:4],
+        "next_step": "Try one quick example, then test an edge case.",
+        "confidence": "High",
+        "mode": mode,
+        "style": style,
+    }
+
+
+def generate_chat_response(
+    question: str,
+    style: str,
+    mode: str,
+    recent_history: list[dict] | None = None,
+) -> dict:
+    mode_key = (mode or "detailed").strip().lower()
+    if mode_key not in {"concise", "detailed", "eli5", "exam"}:
+        mode_key = "detailed"
+
+    style_key = (style or "visual").strip().lower()
+    if style_key not in {"visual", "auditory", "kinesthetic"}:
+        style_key = "visual"
+
+    base = generate_adaptive_response(question, style_key)
+    history_text = _history_text(recent_history)
+    mode_hint = {
+        "concise": "Keep the answer short, direct, and actionable.",
+        "detailed": "Give a thorough but easy-to-scan explanation.",
+        "eli5": "Explain simply like I am new to the topic.",
+        "exam": "Focus on accuracy, definitions, and exam-ready phrasing.",
+    }[mode_key]
+    style_hint = {
+        "visual": "Use visual metaphors, numbered steps, and clear section names.",
+        "auditory": "Use a conversational tone and summarize key ideas clearly.",
+        "kinesthetic": "Use hands-on implementation steps and a small coding exercise.",
+    }[style_key]
+
+    system_prompt = (
+        "You are Vakify's AI tutor. Return strict JSON only. "
+        "Never use markdown tables. Keep the answer grounded, educational, and concise enough for a learning app."
+    )
+    user_prompt = (
+        f"Question: {question}\n"
+        f"Learning style: {style_key}\n"
+        f"Response mode: {mode_key}\n"
+        f"Mode guidance: {mode_hint}\n"
+        f"Style guidance: {style_hint}\n\n"
+        f"Recent chat context:\n{history_text or 'No prior context.'}\n\n"
+        f"Reference tutor output:\n{base.get('text', '')[:2800]}\n\n"
+        "Create a helpful answer with these fields: title, summary, answer, key_points, example, code_sample, "
+        "practice, quiz_question, quiz_options, follow_up_prompts, next_step, confidence, mode, style."
+    )
+
+    payload = openai_json_schema(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        schema=CHAT_RESPONSE_SCHEMA,
+        name="vakify_chat_response",
+        temperature=0.35,
+    )
+    if not payload:
+        payload = _fallback_chat_response(question, style_key, mode_key, recent_history)
+
+    payload["mode"] = mode_key
+    payload["style"] = style_key
+    payload["assets"] = base.get("assets", {})
+    payload["response_type"] = base.get("response_type", style_key)
+    payload["ai_used"] = bool(base.get("ai_used"))
+    payload["text"] = payload.get("answer") or base.get("text") or ""
+
+    if not isinstance(payload.get("key_points"), list):
+        payload["key_points"] = []
+    if not isinstance(payload.get("quiz_options"), list):
+        payload["quiz_options"] = []
+    if not isinstance(payload.get("follow_up_prompts"), list):
+        payload["follow_up_prompts"] = []
+
+    return payload
