@@ -56,6 +56,15 @@ def test_language_aware_daily_and_weekly_progression(tmp_path, monkeypatch):
     assert quiz_task["content"]["mode"] == "quiz"
     assert len(quiz_task["content"]["questions"]) == 5
 
+    second_today = client.get(
+        "/api/tasks/today",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert second_today.status_code == 200
+    second_today_data = second_today.get_json()
+    assert [task["task_id"] for task in second_today_data["tasks"]] == [task["task_id"] for task in today_data["tasks"]]
+    assert second_today_data["tasks"][0]["content"] == today_data["tasks"][0]["content"]
+
     quiz_answers = {
         str(question["id"]): question["answer"]
         for question in quiz_task["content"]["questions"]
@@ -92,6 +101,15 @@ def test_language_aware_daily_and_weekly_progression(tmp_path, monkeypatch):
     assert weekly_data["quiz"]["language"] == "python"
     assert len(weekly_data["quiz"]["questions"]) == 7
     assert all("answer" in question for question in weekly_data["quiz"]["questions"])
+
+    second_weekly = client.get(
+        "/api/quiz/weekly",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert second_weekly.status_code == 200
+    second_weekly_data = second_weekly.get_json()
+    assert second_weekly_data["quiz"]["quiz_id"] == weekly_data["quiz"]["quiz_id"]
+    assert second_weekly_data["quiz"]["questions"] == weekly_data["quiz"]["questions"]
 
     weekly_answers = {
         str(question["id"]): question["answer"]

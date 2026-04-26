@@ -233,6 +233,7 @@ export function TasksQuiz() {
             {dailyTaskCards.map((task) => {
               const isQuiz = task.task_type === 'quiz';
               const isCode = task.task_type === 'code';
+              const isCompleted = task.status === 'completed';
               return (
                 <div key={task.task_id} className="bg-card border border-border rounded-xl p-6 shadow-sm">
                   <div className="flex items-start justify-between mb-4 gap-4">
@@ -240,7 +241,7 @@ export function TasksQuiz() {
                       <div className="flex items-center gap-2 mb-2">
                         {isCode ? <Code2 className="w-5 h-5 text-primary" /> : <Sparkles className="w-5 h-5 text-secondary" />}
                         <h3 className="text-lg">{task.title}</h3>
-                        {task.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-secondary" />}
+                        {isCompleted && <CheckCircle2 className="w-5 h-5 text-secondary" />}
                       </div>
                       <p className="text-sm text-muted-foreground">{task.description}</p>
                     </div>
@@ -257,7 +258,7 @@ export function TasksQuiz() {
                     <div className="bg-muted rounded-full h-2">
                       <div
                         className="bg-secondary h-full rounded-full transition-all"
-                        style={{ width: task.status === 'completed' ? '100%' : '0%' }}
+                        style={{ width: isCompleted ? '100%' : '0%' }}
                       />
                     </div>
                   </div>
@@ -287,7 +288,7 @@ export function TasksQuiz() {
                         className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
                       >
                         <Play className="w-5 h-5" />
-                        Open in Playground
+                        {isCompleted ? 'Review in Playground' : 'Open in Playground'}
                       </Link>
                     ) : (
                       <button
@@ -301,10 +302,11 @@ export function TasksQuiz() {
                             task.content?.language_label || currentPreferredLanguage,
                           )
                         }
+                        disabled={task.content?.questions?.length === 0}
                         className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
                       >
                         <Play className="w-5 h-5" />
-                        Start Quiz
+                        {isCompleted ? 'Review Quiz' : 'Start Quiz'}
                       </button>
                     )}
                     <button className="px-4 py-3 bg-card border border-border rounded-lg hover:bg-muted transition-colors">
@@ -515,19 +517,43 @@ export function TasksQuiz() {
                   {Object.keys(quizAnswers).length}/{quizModal.questions.length} answered
                 </div>
                 <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setQuizModal(null)}
-                    className="rounded-xl border border-border px-4 py-3 hover:bg-muted"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => void submitQuiz()}
-                    disabled={submittingQuiz}
-                    className="rounded-xl bg-primary px-5 py-3 text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                  >
-                    {submittingQuiz ? 'Submitting...' : 'Submit Answers'}
-                  </button>
+                  {quizResult ? (
+                    <>
+                      {!quizResult.passed ? (
+                        <button
+                          onClick={() => {
+                            setQuizAnswers({});
+                            setQuizResult(null);
+                          }}
+                          className="rounded-xl border border-border px-4 py-3 hover:bg-muted"
+                        >
+                          Retry Quiz
+                        </button>
+                      ) : null}
+                      <button
+                        onClick={() => setQuizModal(null)}
+                        className="rounded-xl bg-primary px-5 py-3 text-primary-foreground hover:opacity-90"
+                      >
+                        Close
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setQuizModal(null)}
+                        className="rounded-xl border border-border px-4 py-3 hover:bg-muted"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => void submitQuiz()}
+                        disabled={submittingQuiz}
+                        className="rounded-xl bg-primary px-5 py-3 text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                      >
+                        {submittingQuiz ? 'Submitting...' : 'Submit Answers'}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

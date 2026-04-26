@@ -142,38 +142,10 @@ def _sync_daily_tasks(user_id: int, profile: UserProfile, today: date) -> list[D
             db.session.add(row)
             rows.append(row)
         db.session.commit()
-        return DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
+        rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
 
-    for idx, item in enumerate(desired):
-        if idx < len(rows):
-            row = rows[idx]
-        else:
-            row = DailyTask(user_id=user_id, due_date=today)
-            db.session.add(row)
-            rows.append(row)
-
-        should_update = (
-            row.title != item["title"]
-            or row.description != item["description"]
-            or row.task_type != item["task_type"]
-            or row.points_reward != item["points_reward"]
-            or row.content_json != item["content_json"]
-        )
-        if should_update:
-            row.title = item["title"]
-            row.description = item["description"]
-            row.task_type = item["task_type"]
-            row.difficulty = profile.difficulty_level or "beginner"
-            row.status = "assigned"
-            row.points_reward = item["points_reward"]
-            row.content_json = item["content_json"]
-            row.updated_at = datetime.utcnow()
-
-    for extra in rows[len(desired):]:
-        db.session.delete(extra)
-
-    db.session.commit()
-    return DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
+    # Keep today's tasks stable once created so users see the same set for the full day.
+    return rows
 
 
 @progression_bp.get("/tasks/today")
@@ -310,12 +282,6 @@ def get_weekly_quiz():
                 question_payload=bundle["questions"],
             )
             db.session.add(quiz)
-        else:
-            quiz.title = f"{bundle['title']} ({_week_key(week_start)})"
-            quiz.week_end = week_end
-            quiz.difficulty = bundle["difficulty"]
-            quiz.question_payload = bundle["questions"]
-            quiz.updated_at = datetime.utcnow()
 
     db.session.commit()
 
