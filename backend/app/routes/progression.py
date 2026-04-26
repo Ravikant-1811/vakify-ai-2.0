@@ -16,6 +16,11 @@ from app.models import (
     WeeklyQuizAttempt,
     XPEvent,
 )
+from app.services.progression_content_service import (
+    build_daily_task_bundle,
+    build_weekly_quiz_bundle,
+    normalize_language,
+)
 
 
 progression_bp = Blueprint("progression", __name__, url_prefix="/api")
@@ -64,6 +69,12 @@ def _ensure_streak(user_id: int) -> UserStreak:
     return streak
 
 
+def _preferred_language(profile: UserProfile | None) -> str:
+    if profile and isinstance(profile.preferred_languages, list) and profile.preferred_languages:
+        return normalize_language(profile.preferred_languages[0])
+    return "python"
+
+
 def _touch_streak(streak: UserStreak, active_day: date) -> None:
     if streak.last_active_date == active_day:
         return
@@ -92,61 +103,77 @@ def _award_xp(user_id: int, points: int, source: str, source_id: int | None = No
     return wallet
 
 
-def _default_daily_tasks(difficulty: str) -> list[dict]:
-    return [
-        {
-            "title": "Concept Check: Explain OOP",
-            "description": "In 6-8 lines, explain encapsulation, inheritance, polymorphism, and abstraction with one real example.",
-            "task_type": "conceptual",
-            "difficulty": difficulty,
-            "points_reward": 20,
-        },
-        {
-            "title": "Practice Task: Build a Palindrome Checker",
-            "description": "Write a function in your preferred language to check if a string is palindrome. Include at least 3 test cases.",
-            "task_type": "practical",
-            "difficulty": difficulty,
-            "points_reward": 25,
-        },
-    ]
+def _serialize_task(task: DailyTask) -> dict:
+    payload = task.content_json or {}
+    return {
+        "task_id": task.task_id,
+        "user_id": task.user_id,
+        "title": task.title,
+        "description": task.description,
+        "task_type": task.task_type,
+        "difficulty": task.difficulty,
+        "status": task.status,
+        "points_reward": task.points_reward,
+        "due_date": task.due_date.isoformat(),
+        "content": payload,
+        "created_at": task.created_at.isoformat(),
+        "updated_at": task.updated_at.isoformat(),
+    }
 
 
-def _default_weekly_quiz(difficulty: str) -> list[dict]:
-    return [
-        {
-            "id": 1,
-            "type": "mcq",
-            "question": "Which OOP principle hides internal implementation details?",
-            "options": ["Polymorphism", "Encapsulation", "Inheritance", "Recursion"],
-            "answer": "Encapsulation",
-        },
-        {
-            "id": 2,
-            "type": "mcq",
-            "question": "What is the average time complexity of binary search?",
-            "options": ["O(n)", "O(log n)", "O(n log n)", "O(1)"],
-            "answer": "O(log n)",
-        },
-        {
-            "id": 3,
-            "type": "text",
-            "question": "Name one practical use case of polymorphism in software design.",
-            "answer": "open",
-        },
-        {
-            "id": 4,
-            "type": "mcq",
-            "question": "Which data structure follows FIFO order?",
-            "options": ["Stack", "Queue", "Tree", "Graph"],
-            "answer": "Queue",
-        },
-        {
-            "id": 5,
-            "type": "text",
-            "question": "Write one test case for palindrome checker with expected output.",
-            "answer": "open",
-        },
-    ]
+def _sync_daily_tasks(user_id: int, profile: UserProfile, today: date) -> list[DailyTask]:
+    desired = build_daily_task_bundle(_preferred_language(profile), profile.difficulty_level or "beginner")
+    rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
+
+    if not rows:
+        rows = []
+        for item in desired:
+            row = DailyTask(
+                user_id=user_id,
+                title=item["title"],
+                description=item["description"],
+                task_type=item["task_type"],
+                difficulty=profile.difficulty_level or "beginner",
+                status="assigned",
+                points_reward=item["points_reward"],
+                content_json=item["content_json"],
+                due_date=today,
+            )
+            db.session.add(row)
+            rows.append(row)
+        db.session.commit()
+        return DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
+
+    for idx, item in enumerate(desired):
+        if idx < len(rows):
+            row = rows[idx]
+        else:
+            row = DailyTask(user_id=user_id, due_date=today)
+            db.session.add(row)
+            rows.append(row)
+
+        should_update = (
+            row.title != item["title"]
+            or row.description != item["description"]
+            or row.task_type != item["task_type"]
+            or row.points_reward != item["points_reward"]
+            or row.content_json != item["content_json"]
+        )
+        if should_update:
+            row.title = item["title"]
+            row.description = item["description"]
+            row.task_type = item["task_type"]
+            row.difficulty = profile.difficulty_level or "beginner"
+            row.status = "assigned"
+            row.points_reward = item["points_reward"]
+            row.content_json = item["content_json"]
+            row.updated_at = datetime.utcnow()
+
+    for extra in rows[len(desired):]:
+        db.session.delete(extra)
+
+    db.session.commit()
+    return DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
 
 
 @progression_bp.get("/tasks/today")
@@ -156,44 +183,28 @@ def get_today_tasks():
     today = datetime.utcnow().date()
 
     profile = _ensure_profile(user_id)
-    rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
-
-    if not rows:
-        for task in _default_daily_tasks(profile.difficulty_level or "beginner"):
-            db.session.add(
-                DailyTask(
-                    user_id=user_id,
-                    title=task["title"],
-                    description=task["description"],
-                    task_type=task["task_type"],
-                    difficulty=task["difficulty"],
-                    points_reward=task["points_reward"],
-                    due_date=today,
-                    status="assigned",
-                )
-            )
-        db.session.commit()
-        rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
-    else:
-        db.session.commit()
+    rows = _sync_daily_tasks(user_id, profile, today)
 
     return jsonify(
         {
             "date": today.isoformat(),
             "tasks": [
-                {
-                    "task_id": r.task_id,
-                    "title": r.title,
-                    "description": r.description,
-                    "task_type": r.task_type,
-                    "difficulty": r.difficulty,
-                    "status": r.status,
-                    "points_reward": r.points_reward,
-                }
+                _serialize_task(r)
                 for r in rows
             ],
+            "preferred_language": _preferred_language(profile),
         }
     )
+
+
+@progression_bp.get("/tasks/<int:task_id>")
+@jwt_required()
+def get_daily_task(task_id: int):
+    user_id = int(get_jwt_identity())
+    row = DailyTask.query.filter_by(task_id=task_id, user_id=user_id).first()
+    if not row:
+        return jsonify({"error": "task not found"}), 404
+    return jsonify(_serialize_task(row))
 
 
 @progression_bp.post("/tasks/<int:task_id>/submit")
@@ -203,21 +214,40 @@ def submit_task(task_id: int):
     payload = request.get_json() or {}
     submission_text = str(payload.get("submission", "")).strip()
     score = int(payload.get("score", 100))
+    answers = payload.get("answers", {})
 
     row = DailyTask.query.filter_by(task_id=task_id, user_id=user_id).first()
     if not row:
         return jsonify({"error": "task not found"}), 404
 
     was_completed = row.status == "completed"
-    row.status = "completed"
+    content = row.content_json or {}
+    scored_value = max(0, min(score, 100))
+    passed = scored_value >= 70
+
+    if row.task_type == "quiz":
+        questions = content.get("questions") if isinstance(content, dict) else []
+        if isinstance(questions, list) and questions:
+            normalized_answers = answers if isinstance(answers, dict) else {}
+            correct = 0
+            for question in questions:
+                qid = str(question.get("id"))
+                expected = str(question.get("answer", "")).strip().lower()
+                chosen = str(normalized_answers.get(qid, "")).strip().lower()
+                if expected and chosen == expected:
+                    correct += 1
+            scored_value = round((correct / len(questions)) * 100)
+            passed = scored_value >= 70
+            submission_text = str(normalized_answers)
+    row.status = "completed" if passed else "submitted"
     row.updated_at = datetime.utcnow()
 
     attempt = DailyTaskAttempt(
         task_id=row.task_id,
         user_id=user_id,
         submission_text=submission_text or None,
-        score=max(0, min(score, 100)),
-        status="completed",
+        score=scored_value,
+        status="completed" if passed else "submitted",
     )
     db.session.add(attempt)
 
@@ -225,14 +255,14 @@ def submit_task(task_id: int):
     streak = _ensure_streak(user_id)
 
     awarded = 0
-    if not was_completed:
+    if passed and not was_completed:
         awarded = row.points_reward or 20
         wallet = _award_xp(
             user_id=user_id,
             points=awarded,
             source="daily_task",
             source_id=row.task_id,
-            meta={"task_type": row.task_type, "difficulty": row.difficulty},
+            meta={"task_type": row.task_type, "difficulty": row.difficulty, "score": scored_value},
         )
 
     _touch_streak(streak, datetime.utcnow().date())
@@ -243,6 +273,8 @@ def submit_task(task_id: int):
             "message": "task submitted",
             "task_id": row.task_id,
             "status": row.status,
+            "passed": passed,
+            "score": scored_value,
             "xp_awarded": awarded,
             "wallet": {
                 "current_xp": wallet.current_xp,
@@ -265,18 +297,25 @@ def get_weekly_quiz():
     week_start, week_end = _week_bounds(today)
 
     profile = _ensure_profile(user_id)
+    bundle = build_weekly_quiz_bundle(_preferred_language(profile), profile.difficulty_level or "beginner")
     with db.session.no_autoflush:
         quiz = WeeklyQuiz.query.filter_by(user_id=user_id, week_start=week_start).first()
         if not quiz:
             quiz = WeeklyQuiz(
                 user_id=user_id,
-                title=f"Weekly Adaptive Quiz ({_week_key(week_start)})",
+                title=f"{bundle['title']} ({_week_key(week_start)})",
                 week_start=week_start,
                 week_end=week_end,
-                difficulty=profile.difficulty_level or "beginner",
-                question_payload=_default_weekly_quiz(profile.difficulty_level or "beginner"),
+                difficulty=bundle["difficulty"],
+                question_payload=bundle["questions"],
             )
             db.session.add(quiz)
+        else:
+            quiz.title = f"{bundle['title']} ({_week_key(week_start)})"
+            quiz.week_end = week_end
+            quiz.difficulty = bundle["difficulty"]
+            quiz.question_payload = bundle["questions"]
+            quiz.updated_at = datetime.utcnow()
 
     db.session.commit()
 
@@ -292,6 +331,7 @@ def get_weekly_quiz():
                 "week_end": quiz.week_end.isoformat(),
                 "difficulty": quiz.difficulty,
                 "questions": quiz.question_payload,
+                "language": _preferred_language(profile),
             },
             "attempts": len(attempts),
             "best_score": round(best_score, 2),

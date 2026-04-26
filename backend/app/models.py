@@ -141,6 +141,7 @@ class DailyTask(db.Model):
     difficulty = db.Column(db.String(20), default="beginner", nullable=False)
     status = db.Column(db.String(20), default="assigned", nullable=False)
     points_reward = db.Column(db.Integer, default=20, nullable=False)
+    content_json = db.Column(db.JSON, nullable=True)
     due_date = db.Column(db.Date, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

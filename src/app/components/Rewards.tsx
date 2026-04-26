@@ -102,6 +102,21 @@ export function Rewards() {
         </p>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="text-sm text-muted-foreground mb-2">Total XP</div>
+          <div className="text-3xl text-primary">{summary?.wallet.current_xp ?? user?.xp ?? 0}</div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="text-sm text-muted-foreground mb-2">Reward Points</div>
+          <div className="text-3xl text-secondary">{summary?.wallet.reward_points ?? user?.xp ?? 0}</div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="text-sm text-muted-foreground mb-2">Current Streak</div>
+          <div className="text-3xl text-accent">{summary?.streak.current_streak ?? user?.streak ?? 0}</div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-card border border-border rounded-xl p-6 shadow-sm">

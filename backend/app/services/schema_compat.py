@@ -13,6 +13,9 @@ def ensure_schema_compatibility(db) -> list[str]:
         "code_lab_submissions": {
             "task_id": "INTEGER",
         },
+        "daily_tasks": {
+            "content_json": "JSON",
+        },
     }
 
     for table_name, columns in legacy_columns.items():

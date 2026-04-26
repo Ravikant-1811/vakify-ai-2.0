@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.extensions import db
-from app.models import ChatHistory, ChatThreadMessage, CodeLabSubmission, CodeLabTask
+from app.models import ChatHistory, ChatThreadMessage, CodeLabSubmission, CodeLabTask, DailyTask
 from app.services.code_lab_service import (
     generate_lab_task_from_chat,
     get_challenge,
@@ -46,14 +46,15 @@ def _latest_thread_id_for_chat(chat_id: int, user_id: int) -> int | None:
     return row.thread_id if row else None
 
 
-def _build_validation_tests(task: CodeLabTask | None, result: dict, source_code: str) -> list[dict]:
+def _build_validation_tests(task: CodeLabTask | DailyTask | None, result: dict, source_code: str) -> list[dict]:
     normalized = (source_code or "").lower()
     tests = [
         {"name": "Program compiled or executed", "passed": result.get("status") == "success"},
     ]
 
     if task:
-        expected = (task.expected_output or "").strip()
+        content = getattr(task, "content_json", None) or {}
+        expected = (getattr(task, "expected_output", None) or content.get("expected_output") or "").strip()
         if expected:
             stdout = (result.get("stdout") or "").strip()
             tests.append(
@@ -62,7 +63,8 @@ def _build_validation_tests(task: CodeLabTask | None, result: dict, source_code:
                     "passed": expected == stdout or expected in stdout,
                 }
             )
-        validations = [str(item).strip().lower() for item in (task.validation_json or []) if str(item).strip()]
+        validations_source = getattr(task, "validation_json", None) or content.get("validation_json") or []
+        validations = [str(item).strip().lower() for item in validations_source if str(item).strip()]
         for item in validations[:3]:
             tests.append(
                 {
@@ -70,11 +72,12 @@ def _build_validation_tests(task: CodeLabTask | None, result: dict, source_code:
                     "passed": item in normalized,
                 }
             )
-        if task.hint:
+        hint = (getattr(task, "hint", None) or content.get("hint") or "").strip()
+        if hint:
             tests.append(
                 {
                     "name": "Hint-related concept present",
-                    "passed": any(word in normalized for word in task.hint.lower().split()[:3]),
+                    "passed": any(word in normalized for word in hint.lower().split()[:3]),
                 }
             )
     else:
@@ -119,6 +122,10 @@ def _current_task_for_user(user_id: int, language: str) -> CodeLabTask | None:
         .order_by(CodeLabTask.updated_at.desc())
         .first()
     )
+
+
+def _daily_task_for_user(user_id: int, task_id: int) -> DailyTask | None:
+    return DailyTask.query.filter_by(task_id=task_id, user_id=user_id).first()
 
 
 @lab_bp.get("/challenges")
@@ -206,35 +213,50 @@ def run():
         return jsonify({"error": "source_code is required"}), 400
 
     task = None
+    daily_task = None
     if task_id is not None:
         task = CodeLabTask.query.filter_by(task_id=task_id, user_id=user_id).first()
-        if not task:
-            return jsonify({"error": "task not found"}), 404
-        language = task.language
-        challenge_key = challenge_key or task.task_key
-        title = title or task.title
-        if not stdin_text.strip():
-            stdin_text = task.sample_input or ""
+        if task:
+            language = task.language
+            challenge_key = challenge_key or task.task_key
+            title = title or task.title
+            if not stdin_text.strip():
+                stdin_text = task.sample_input or ""
+        else:
+            daily_task = _daily_task_for_user(user_id, task_id)
+            if not daily_task:
+                return jsonify({"error": "task not found"}), 404
+            content = daily_task.content_json or {}
+            language = str(content.get("language") or language or "python").strip().lower()
+            challenge_key = challenge_key or str(content.get("task_key") or f"daily-{daily_task.task_id}")
+            title = title or daily_task.title
+            if not stdin_text.strip():
+                stdin_text = str(content.get("sample_input") or "")
 
     if not challenge_key:
         challenge_key = get_challenge(language)["key"]
     if not title:
-        title = task.title if task else get_challenge(language)["title"]
+        if task:
+            title = task.title
+        elif daily_task:
+            title = daily_task.title
+        else:
+            title = get_challenge(language)["title"]
 
     result = run_code(language, source_code, stdin_text)
     tests = result.get("tests", [])
     passed_tests = sum(1 for item in tests if item.get("passed"))
     total_tests = len(tests)
     score = int(round((passed_tests / total_tests) * 100)) if total_tests else 0
-    if task:
-        tests = _build_validation_tests(task, result, source_code)
+    if task or daily_task:
+        tests = _build_validation_tests(task or daily_task, result, source_code)
         passed_tests = sum(1 for item in tests if item.get("passed"))
         total_tests = len(tests)
         score = int(round((passed_tests / total_tests) * 100)) if total_tests else 0
 
     row = CodeLabSubmission(
         user_id=user_id,
-        task_id=task.task_id if task else None,
+        task_id=(task.task_id if task else daily_task.task_id if daily_task else None),
         language=result.get("language", language),
         challenge_key=challenge_key,
         title=title,
@@ -254,6 +276,19 @@ def run():
             **result,
             "submission_id": row.submission_id,
             "task": _serialize_task(task) if task else None,
+            "daily_task": None
+            if not daily_task
+            else {
+                "task_id": daily_task.task_id,
+                "title": daily_task.title,
+                "description": daily_task.description,
+                "task_type": daily_task.task_type,
+                "difficulty": daily_task.difficulty,
+                "status": daily_task.status,
+                "points_reward": daily_task.points_reward,
+                "due_date": daily_task.due_date.isoformat(),
+                "content": daily_task.content_json or {},
+            },
             "passed_tests": passed_tests,
             "total_tests": total_tests,
             "score": score,

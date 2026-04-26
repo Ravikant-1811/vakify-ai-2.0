@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import {
   Play,
   CheckCircle2,
@@ -8,8 +9,10 @@ import {
   Terminal,
   RotateCcw,
   CircleDashed,
+  BookOpen,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 type RunResponse = {
   status: string;
@@ -24,6 +27,28 @@ type RunResponse = {
   submission_id?: number;
 };
 
+type DailyTaskPayload = {
+  task_id: number;
+  title: string;
+  description: string;
+  task_type: string;
+  difficulty: string;
+  status: string;
+  points_reward: number;
+  due_date: string;
+  content: {
+    mode?: string;
+    language?: string;
+    language_label?: string;
+    task_key?: string;
+    starter_code?: string;
+    sample_input?: string;
+    expected_output?: string;
+    hint?: string;
+    validation_json?: string[];
+  };
+};
+
 const languages = [
   { id: 'python', name: 'Python' },
   { id: 'javascript', name: 'JavaScript' },
@@ -33,7 +58,11 @@ const languages = [
 ];
 
 export function TrainingCoder() {
+  const { refreshUser } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedLanguage, setSelectedLanguage] = useState('python');
+  const [task, setTask] = useState<DailyTaskPayload | null>(null);
+  const [loadingTask, setLoadingTask] = useState(false);
   const [code, setCode] = useState('');
   const [stdin, setStdin] = useState('');
   const [output, setOutput] = useState('');
@@ -41,6 +70,53 @@ export function TrainingCoder() {
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
+    const taskId = searchParams.get('task_id');
+    if (!taskId) {
+      setTask(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadTask = async () => {
+      setLoadingTask(true);
+      try {
+        const data = await apiFetch<DailyTaskPayload>(`/api/tasks/${taskId}`);
+        if (cancelled) {
+          return;
+        }
+        setTask(data);
+        if (data.content?.language) {
+          setSelectedLanguage(data.content.language);
+        }
+        const codeKey = `vakify.training.code.task.${taskId}`;
+        const stdinKey = `vakify.training.stdin.task.${taskId}`;
+        const savedCode = window.localStorage.getItem(codeKey);
+        const savedStdin = window.localStorage.getItem(stdinKey);
+        setCode(savedCode ?? data.content?.starter_code ?? '');
+        setStdin(savedStdin ?? data.content?.sample_input ?? '');
+        setOutput('');
+        setTests([]);
+      } catch {
+        if (!cancelled) {
+          setTask(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingTask(false);
+        }
+      }
+    };
+
+    void loadTask();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (task) {
+      return;
+    }
     const codeKey = `vakify.training.code.${selectedLanguage}`;
     const stdinKey = `vakify.training.stdin.${selectedLanguage}`;
     const savedCode = window.localStorage.getItem(codeKey);
@@ -49,28 +125,55 @@ export function TrainingCoder() {
     setStdin(savedStdin ?? '');
     setOutput('');
     setTests([]);
-  }, [selectedLanguage]);
+  }, [selectedLanguage, task]);
 
   useEffect(() => {
-    window.localStorage.setItem(`vakify.training.code.${selectedLanguage}`, code);
-  }, [code, selectedLanguage]);
+    if (task?.task_id) {
+      window.localStorage.setItem(`vakify.training.code.task.${task.task_id}`, code);
+    } else {
+      window.localStorage.setItem(`vakify.training.code.${selectedLanguage}`, code);
+    }
+  }, [code, selectedLanguage, task?.task_id]);
 
   useEffect(() => {
-    window.localStorage.setItem(`vakify.training.stdin.${selectedLanguage}`, stdin);
-  }, [stdin, selectedLanguage]);
+    if (task?.task_id) {
+      window.localStorage.setItem(`vakify.training.stdin.task.${task.task_id}`, stdin);
+    } else {
+      window.localStorage.setItem(`vakify.training.stdin.${selectedLanguage}`, stdin);
+    }
+  }, [stdin, selectedLanguage, task?.task_id]);
 
   const resetBlank = () => {
+    if (task?.task_id) {
+      window.localStorage.removeItem(`vakify.training.code.task.${task.task_id}`);
+      window.localStorage.removeItem(`vakify.training.stdin.task.${task.task_id}`);
+      setSearchParams({});
+      setTask(null);
+    } else {
+      window.localStorage.removeItem(`vakify.training.code.${selectedLanguage}`);
+      window.localStorage.removeItem(`vakify.training.stdin.${selectedLanguage}`);
+    }
     setCode('');
     setStdin('');
     setOutput('');
     setTests([]);
-    window.localStorage.removeItem(`vakify.training.code.${selectedLanguage}`);
-    window.localStorage.removeItem(`vakify.training.stdin.${selectedLanguage}`);
+  };
+
+  const handleLanguageChange = (language: string) => {
+    if (task) {
+      setTask(null);
+      setSearchParams({});
+      setCode('');
+      setStdin('');
+      setOutput('');
+      setTests([]);
+    }
+    setSelectedLanguage(language);
   };
 
   const handleRun = async () => {
     setRunning(true);
-    setOutput('Running code...\n');
+    setOutput(task ? `Running ${task.title}...\n` : 'Running code...\n');
     try {
       const response = await apiFetch<RunResponse>('/api/lab/run', {
         method: 'POST',
@@ -78,8 +181,27 @@ export function TrainingCoder() {
           language: selectedLanguage,
           source_code: code,
           stdin,
+          task_id: task?.task_id ?? null,
+          challenge_key: task?.content?.task_key ?? undefined,
+          title: task?.title ?? undefined,
         }),
       });
+
+      if (task?.task_id) {
+        const submitResponse = await apiFetch<{ xp_awarded: number; passed: boolean; score: number }>(
+          `/api/tasks/${task.task_id}/submit`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              submission: code,
+              score: response.score ?? 0,
+            }),
+          },
+        );
+        if (submitResponse.passed) {
+          await refreshUser();
+        }
+      }
 
       setOutput(
         `${response.stdout || '(no stdout)'}\n${response.stderr ? `\n${response.stderr}` : ''}\n\nTests Passed: ${response.passed_tests}/${response.total_tests}\nScore: ${response.score}%\nRunner: ${response.runner}\n${response.note ? `\n${response.note}` : ''}`,
@@ -106,26 +228,70 @@ export function TrainingCoder() {
     <div className="min-h-[calc(100vh-4rem)] flex flex-col p-6 max-w-7xl mx-auto gap-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl mb-2">Training Coder</h1>
+          <h1 className="text-3xl mb-2">{task ? 'Challenge Runner' : 'Training Coder'}</h1>
           <p className="text-muted-foreground max-w-4xl">
-            A clean blank editor for practice, experiments, and freeform coding. Nothing is auto-filled.
+            {task
+              ? 'A loaded task from your daily queue. Edit the code, run it, and earn points when it passes.'
+              : 'A clean editor for practice, experiments, and freeform coding. Nothing is auto-filled.'}
           </p>
         </div>
-        <button
-          onClick={resetBlank}
-          className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium hover:bg-muted transition-colors"
-        >
-          <RotateCcw className="w-4 h-4" />
-          Reset Blank
-        </button>
+        <div className="flex items-center gap-3">
+          {task ? (
+            <div className="rounded-xl border border-secondary/20 bg-secondary/10 px-4 py-3 text-sm text-secondary inline-flex items-center gap-2">
+              <BookOpen className="w-4 h-4" />
+              {loadingTask ? 'Loading task...' : task.title}
+            </div>
+          ) : null}
+          <button
+            onClick={resetBlank}
+            className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium hover:bg-muted transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" />
+            {task ? 'Clear Task' : 'Reset Blank'}
+          </button>
+        </div>
       </div>
+
+      {task ? (
+        <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm uppercase tracking-[0.3em] text-muted-foreground">Loaded task</div>
+              <h2 className="text-2xl mt-2">{task.title}</h2>
+              <p className="text-muted-foreground mt-3 max-w-4xl">{task.description}</p>
+            </div>
+            <div className="text-right">
+              <div className="rounded-full bg-secondary/10 text-secondary px-3 py-1 text-sm inline-flex">
+                +{task.points_reward} XP
+              </div>
+              <div className="text-sm text-muted-foreground mt-3">
+                {task.content?.language_label || selectedLanguage}
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="rounded-2xl bg-muted/40 border border-border p-4">
+              <div className="text-muted-foreground mb-1">Mode</div>
+              <div className="font-medium capitalize">{task.task_type}</div>
+            </div>
+            <div className="rounded-2xl bg-muted/40 border border-border p-4">
+              <div className="text-muted-foreground mb-1">Sample Input</div>
+              <div className="font-mono whitespace-pre-wrap">{task.content?.sample_input || 'No sample input'}</div>
+            </div>
+            <div className="rounded-2xl bg-muted/40 border border-border p-4">
+              <div className="text-muted-foreground mb-1">Hint</div>
+              <div>{task.content?.hint || 'No hint provided'}</div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
           {languages.map((lang) => (
             <button
               key={lang.id}
-              onClick={() => setSelectedLanguage(lang.id)}
+              onClick={() => handleLanguageChange(lang.id)}
               className={`px-4 py-2 rounded-xl transition-colors ${
                 selectedLanguage === lang.id
                   ? 'bg-primary text-primary-foreground'
@@ -138,7 +304,7 @@ export function TrainingCoder() {
           <div className="flex-1" />
           <div className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground inline-flex items-center gap-2">
             <CircleDashed className="w-4 h-4" />
-            Blank workspace
+            {task ? 'Task workspace' : 'Blank workspace'}
           </div>
         </div>
       </div>
@@ -156,8 +322,8 @@ export function TrainingCoder() {
             <textarea
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              className="flex-1 min-h-[640px] p-5 font-mono text-sm leading-6 bg-primary/5 resize-none focus:outline-none"
-              placeholder="// Start from scratch..."
+              className="flex-1 min-h-[680px] p-5 font-mono text-sm leading-6 bg-primary/5 resize-none focus:outline-none"
+              placeholder={task ? task.content?.starter_code || '// Start from the loaded task...' : '// Start from scratch...'}
               spellCheck={false}
             />
           </div>
@@ -241,7 +407,9 @@ export function TrainingCoder() {
                 ))
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-sm text-muted-foreground">
-                  This page starts blank. Add code, add input, and press run.
+                  {task
+                    ? 'Run the loaded task to check your solution and award points when it passes.'
+                    : 'A clean blank editor for practice, experiments, and freeform coding. Nothing is auto-filled.'}
                 </div>
               )}
             </div>
