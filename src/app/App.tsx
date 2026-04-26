@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { Landing } from './components/Landing';
 import { Login } from './components/Login';
 import { GoogleCallback } from './components/GoogleCallback';
 import { Onboarding } from './components/Onboarding';
@@ -85,7 +86,7 @@ function AppRoutes() {
       <Route path="/admin" element={<RoleRoute allow={['admin']}><AdminConsole /></RoleRoute>} />
       <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
 
-      <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+      <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Landing />} />
     </Routes>
   );
 }
