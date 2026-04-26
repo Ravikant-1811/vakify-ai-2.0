@@ -123,6 +123,19 @@ export function TasksQuiz() {
   }, []);
 
   const openQuiz = (kind: 'daily' | 'weekly', title: string, points: number, questions: QuizModalState['questions'], submitId: number, summary: string) => {
+    if (!questions.length) {
+      setQuizModal({
+        kind,
+        title,
+        points,
+        questions: [],
+        submitId,
+        summary: 'This quiz does not have any questions yet. Refresh the page or sync the task again.',
+      });
+      setQuizAnswers({});
+      setQuizResult(null);
+      return;
+    }
     setQuizModal({ kind, title, points, questions, submitId, summary });
     setQuizAnswers({});
     setQuizResult(null);
@@ -305,8 +318,8 @@ export function TasksQuiz() {
                             task.content?.language_label || currentPreferredLanguage,
                           )
                         }
-                        disabled={task.content?.questions?.length === 0}
-                        className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                        disabled={!task.content?.questions?.length}
+                        className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Play className="w-5 h-5" />
                         {isCompleted ? 'Review Quiz' : 'Start Quiz'}
@@ -395,7 +408,8 @@ export function TasksQuiz() {
                   weeklyQuiz.language_label,
                 )
               }
-              className="w-full bg-white text-primary py-4 rounded-lg hover:bg-white/90 transition-colors flex items-center justify-center gap-2"
+              disabled={!weeklyQuiz?.questions?.length}
+              className="w-full bg-white text-primary py-4 rounded-lg hover:bg-white/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Clock className="w-5 h-5" />
               {weeklyAttempts > 0 ? 'Retake Weekly Quiz' : 'Start Quiz Now'}
@@ -456,6 +470,12 @@ export function TasksQuiz() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {!quizModal.questions.length ? (
+                <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-6 text-sm text-muted-foreground">
+                  {quizModal.summary}
+                </div>
+              ) : null}
+
               {quizModal.questions.map((question, index) => (
                 <div key={question.id} className="rounded-2xl border border-border bg-muted/20 p-4">
                   <div className="flex items-start justify-between gap-3 mb-4">
@@ -550,7 +570,7 @@ export function TasksQuiz() {
                       </button>
                       <button
                         onClick={() => void submitQuiz()}
-                        disabled={submittingQuiz}
+                        disabled={submittingQuiz || quizModal.questions.length === 0}
                         className="rounded-xl bg-primary px-5 py-3 text-primary-foreground hover:opacity-90 disabled:opacity-50"
                       >
                         {submittingQuiz ? 'Submitting...' : 'Submit Answers'}

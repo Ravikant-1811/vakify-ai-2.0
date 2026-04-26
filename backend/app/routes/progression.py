@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from copy import deepcopy
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -122,7 +123,9 @@ def _serialize_task(task: DailyTask) -> dict:
 
 
 def _sync_daily_tasks(user_id: int, profile: UserProfile, today: date) -> list[DailyTask]:
-    desired = build_daily_task_bundle(_preferred_language(profile), profile.difficulty_level or "beginner")
+    language = _preferred_language(profile)
+    difficulty = profile.difficulty_level or "beginner"
+    desired = build_daily_task_bundle(language, difficulty)
     rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
 
     if not rows:
@@ -143,6 +146,30 @@ def _sync_daily_tasks(user_id: int, profile: UserProfile, today: date) -> list[D
             rows.append(row)
         db.session.commit()
         rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
+    else:
+        changed = False
+        for index, row in enumerate(rows):
+            if index >= len(desired):
+                break
+            item = desired[index]
+            payload = row.content_json or {}
+            should_backfill = (
+                not isinstance(payload, dict)
+                or payload.get("mode") != item["content_json"].get("mode")
+                or not payload
+                or row.task_type not in {"code", "quiz"}
+            )
+            if should_backfill:
+                row.title = item["title"]
+                row.description = item["description"]
+                row.task_type = item["task_type"]
+                row.difficulty = difficulty
+                row.points_reward = item["points_reward"]
+                row.content_json = deepcopy(item["content_json"])
+                changed = True
+        if changed:
+            db.session.commit()
+            rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
 
     # Keep today's tasks stable once created so users see the same set for the full day.
     return rows
@@ -282,6 +309,17 @@ def get_weekly_quiz():
                 question_payload=bundle["questions"],
             )
             db.session.add(quiz)
+        else:
+            payload = quiz.question_payload or []
+            if (
+                not isinstance(payload, list)
+                or len(payload) < len(bundle["questions"])
+                or quiz.title != f"{bundle['title']} ({week_start.isocalendar()[0]}-W{week_start.isocalendar()[1]:02d})"
+            ):
+                quiz.title = f"{bundle['title']} ({week_start.isocalendar()[0]}-W{week_start.isocalendar()[1]:02d})"
+                quiz.week_end = week_end
+                quiz.difficulty = bundle["difficulty"]
+                quiz.question_payload = deepcopy(bundle["questions"])
 
     db.session.commit()
 

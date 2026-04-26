@@ -1,5 +1,6 @@
 from app import create_app
 from app.extensions import db
+from app.models import DailyTask, WeeklyQuiz
 
 
 def _client(tmp_path, monkeypatch):
@@ -138,6 +139,60 @@ def test_language_aware_daily_and_weekly_progression(tmp_path, monkeypatch):
     assert rewards.status_code == 200
     rewards_data = rewards.get_json()
     assert rewards_data["wallet"]["reward_points"] >= quiz_result["xp_awarded"] + code_result["xp_awarded"] + weekly_result["xp_awarded"]
+
+
+def test_progression_backfills_stale_saved_rows(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    token = _register(client, "backfill@example.com", "Backfill Learner")
+
+    client.put(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "preferred_language": "python",
+            "learning_level": "beginner",
+        },
+    )
+
+    first_today = client.get(
+        "/api/tasks/today",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert first_today.status_code == 200
+    today_data = first_today.get_json()
+    quiz_task = next(task for task in today_data["tasks"] if task["task_type"] == "quiz")
+    assert len(quiz_task["content"]["questions"]) == 5
+
+    with client.application.app_context():
+        for task in DailyTask.query.filter_by(user_id=1).all():
+            task.content_json = None
+            task.task_type = "conceptual"
+            task.title = "Broken Task"
+            task.description = "Broken"
+        quiz = WeeklyQuiz.query.filter_by(user_id=1).first()
+        if quiz:
+            quiz.question_payload = []
+            quiz.title = "Broken Weekly Quiz"
+        db.session.commit()
+
+    healed_today = client.get(
+        "/api/tasks/today",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert healed_today.status_code == 200
+    healed_data = healed_today.get_json()
+    healed_quiz = next(task for task in healed_data["tasks"] if task["task_type"] == "quiz")
+    healed_code = next(task for task in healed_data["tasks"] if task["task_type"] == "code")
+    assert len(healed_quiz["content"]["questions"]) == 5
+    assert healed_code["content"]["mode"] == "code"
+
+    weekly = client.get(
+        "/api/quiz/weekly",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert weekly.status_code == 200
+    weekly_data = weekly.get_json()
+    assert len(weekly_data["quiz"]["questions"]) == 7
 
 
 def test_training_workspace_persists_draft_and_run_state(tmp_path, monkeypatch):

@@ -650,9 +650,11 @@ def build_weekly_quiz_bundle(language: str | None, difficulty: str | None) -> di
 
 
 def ensure_daily_and_weekly_progression(user_id: int, profile: UserProfile, today: date) -> None:
+    language = _preferred_language(profile)
+    difficulty = profile.difficulty_level or "beginner"
     daily_rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).all()
     if not daily_rows:
-        for item in build_daily_task_bundle(_preferred_language(profile), profile.difficulty_level or "beginner"):
+        for item in build_daily_task_bundle(language, difficulty):
             db.session.add(
                 DailyTask(
                     user_id=user_id,
@@ -666,12 +668,32 @@ def ensure_daily_and_weekly_progression(user_id: int, profile: UserProfile, toda
                     due_date=today,
                 )
             )
+    else:
+        desired_bundle = build_daily_task_bundle(language, difficulty)
+        for index, row in enumerate(daily_rows):
+            desired = desired_bundle[min(len(desired_bundle) - 1, index)]
+            if not desired:
+                continue
+            payload = row.content_json or {}
+            should_backfill = (
+                not isinstance(payload, dict)
+                or payload.get("mode") != desired["content_json"].get("mode")
+                or not payload
+                or row.task_type not in {"code", "quiz"}
+            )
+            if should_backfill:
+                row.title = desired["title"]
+                row.description = desired["description"]
+                row.task_type = desired["task_type"]
+                row.difficulty = difficulty
+                row.points_reward = desired["points_reward"]
+                row.content_json = deepcopy(desired["content_json"])
 
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
     quiz = WeeklyQuiz.query.filter_by(user_id=user_id, week_start=week_start).first()
     if not quiz:
-        bundle = build_weekly_quiz_bundle(_preferred_language(profile), profile.difficulty_level or "beginner")
+        bundle = build_weekly_quiz_bundle(language, difficulty)
         db.session.add(
             WeeklyQuiz(
                 user_id=user_id,
@@ -682,3 +704,15 @@ def ensure_daily_and_weekly_progression(user_id: int, profile: UserProfile, toda
                 question_payload=bundle["questions"],
             )
         )
+    else:
+        bundle = build_weekly_quiz_bundle(language, difficulty)
+        payload = quiz.question_payload or []
+        if (
+            not isinstance(payload, list)
+            or len(payload) < len(bundle["questions"])
+            or quiz.title != f"{bundle['title']} ({week_start.isocalendar()[0]}-W{week_start.isocalendar()[1]:02d})"
+        ):
+            quiz.title = f"{bundle['title']} ({week_start.isocalendar()[0]}-W{week_start.isocalendar()[1]:02d})"
+            quiz.week_end = week_end
+            quiz.difficulty = bundle["difficulty"]
+            quiz.question_payload = bundle["questions"]
