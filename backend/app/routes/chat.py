@@ -190,10 +190,12 @@ def ask_chatbot():
             db.session.flush()
             audio_download_id = audio_row.download_id
 
+        stored_payload = dict(result)
+        stored_payload.setdefault("text", result.get("answer", ""))
         history = ChatHistory(
             user_id=user_id,
             question=question,
-            response=result["text"],
+            response=json.dumps(stored_payload, ensure_ascii=False),
             response_type=result["response_type"],
             learning_style_used=effective_style,
         )

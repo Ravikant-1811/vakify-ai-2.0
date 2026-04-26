@@ -541,22 +541,97 @@ def _history_text(recent_history: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
+def _key_points_from_text(text: str, limit: int = 5) -> list[str]:
+    sentences = [segment.strip(" -•\t") for segment in re.split(r"[\n.!?]+", text or "") if segment.strip()]
+    points: list[str] = []
+    seen = set()
+    for sentence in sentences:
+        clean = _safe_label(sentence, 110)
+        if len(clean) < 12:
+            continue
+        lowered = clean.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        points.append(clean)
+        if len(points) == limit:
+            break
+    return points
+
+
+def _code_sample_for_topic(question: str, style: str, base_assets: dict | None = None) -> str:
+    assets = base_assets or {}
+    starter = str(assets.get("starter_code") or "").strip()
+    if starter:
+        return starter
+
+    topic = question.strip().rstrip("?") or "the topic"
+    lower = topic.lower()
+    if "python" in lower or style == "visual":
+        return (
+            "def solve():\n"
+            "    value = int(input().strip())\n"
+            "    print('Even' if value % 2 == 0 else 'Odd')\n\n"
+            "solve()"
+        )
+    if "java" in lower:
+        return (
+            "import java.util.Scanner;\n\n"
+            "public class Main {\n"
+            "  public static void main(String[] args) {\n"
+            "    Scanner sc = new Scanner(System.in);\n"
+            "    int value = sc.nextInt();\n"
+            "    System.out.println(value % 2 == 0 ? \"Even\" : \"Odd\");\n"
+            "  }\n"
+            "}"
+        )
+    if "javascript" in lower or "js" in lower:
+        return (
+            "const fs = require('fs');\n"
+            "const value = Number(fs.readFileSync(0, 'utf8').trim());\n"
+            "console.log(value % 2 === 0 ? 'Even' : 'Odd');"
+        )
+    if "c++" in lower or "cpp" in lower:
+        return (
+            "#include <iostream>\n"
+            "using namespace std;\n\n"
+            "int main() {\n"
+            "    int value;\n"
+            "    cin >> value;\n"
+            "    cout << (value % 2 == 0 ? \"Even\" : \"Odd\");\n"
+            "    return 0;\n"
+            "}"
+        )
+    if lower == "c" or re.search(r"\bc\b", lower):
+        return (
+            "#include <stdio.h>\n\n"
+            "int main() {\n"
+            "    int value;\n"
+            "    scanf(\"%d\", &value);\n"
+            "    printf(value % 2 == 0 ? \"Even\" : \"Odd\");\n"
+            "    return 0;\n"
+            "}"
+        )
+    return ""
+
+
 def _fallback_chat_response(question: str, style: str, mode: str, recent_history: list[dict] | None = None) -> dict:
     base = _fallback_response(question, style)
     title = _safe_label(question or "Conversation", 40)
     key_points = [line.strip("- ").strip() for line in base.splitlines() if line.strip()][:5]
     if not key_points:
         key_points = ["Clarify the goal", "Break the problem into steps", "Test with edge cases"]
+    code_sample = _code_sample_for_topic(question, style)
     return {
         "title": title,
-        "summary": f"A {mode} response for {question.strip() or 'your topic'}.",
+        "summary": f"A {mode} response for {question.strip() or 'your topic'} with a clear breakdown.",
         "answer": base,
         "key_points": key_points[:5],
         "example": f"For {question.strip() or 'this topic'}, apply the idea to a small real-world workflow.",
-        "code_sample": "",
+        "code_sample": code_sample,
         "practice": f"Write one tiny exercise for {question.strip() or 'this topic'} and solve it from scratch.",
         "quiz_question": f"What is the main idea behind {question.strip() or 'this topic'}?",
-        "quiz_options": ["Identify the concept", "Ignore edge cases", "Skip testing"],
+        "quiz_options": ["Identify the concept", "Ignore edge cases", "Skip testing", "Jump to the final answer"],
         "follow_up_prompts": _generate_prompt_suggestions(question, style)[:4],
         "next_step": "Try one quick example, then test an edge case.",
         "confidence": "High",
@@ -581,33 +656,83 @@ def generate_chat_response(
 
     base = generate_adaptive_response(question, style_key)
     history_text = _history_text(recent_history)
+    base_text = str(base.get("text", "") or "").strip()
+    base_assets = base.get("assets", {}) if isinstance(base.get("assets", {}), dict) else {}
 
     system_prompt = (
         "You are a friendly, helpful chat assistant for a learning app. "
-        "Reply naturally in plain text like a normal assistant conversation. "
-        "Do not force sections, headings, templates, or structured formatting unless it helps the answer. "
-        "Keep the response concise when possible, but be complete when the question needs depth."
+        "Return polished JSON only, with a natural conversational answer plus organized support fields. "
+        "The answer must sound human and direct, not robotic. "
+        "Use concise, useful section values that make the UI easy to read."
     )
     user_prompt = (
         f"User question: {question}\n"
         f"Learning style hint: {style_key}\n"
         f"Response tone: {mode_key}\n\n"
         f"Recent conversation:\n{history_text or 'No prior context.'}\n\n"
-        f"Reference content from the tutor engine:\n{base.get('text', '')[:2400]}\n\n"
-        "Answer the user naturally and directly."
+        f"Reference content from the tutor engine:\n{base_text[:2400]}\n\n"
+        "Create a polished response payload with these expectations:\n"
+        "- title: short descriptive title\n"
+        "- summary: one-sentence overview\n"
+        "- answer: natural, clear main answer\n"
+        "- key_points: 3 to 5 crisp takeaways\n"
+        "- example: a concrete example or analogy\n"
+        "- code_sample: a short code snippet only if the topic benefits from code, otherwise empty string\n"
+        "- practice: one small practice prompt\n"
+        "- quiz_question: one quick check question\n"
+        "- quiz_options: 3 to 4 answer choices\n"
+        "- follow_up_prompts: 3 to 4 helpful next questions\n"
+        "- next_step: a practical next action\n"
+        "- confidence: High, Medium, or Low\n"
+        "- mode: use the requested response tone\n"
+        "- style: use the learning style hint\n"
     )
 
-    answer = chatgpt_text(system_prompt, user_prompt, temperature=0.45)
-    if not answer:
-        answer = _fallback_response(question, style_key)
+    structured = openai_json_schema(system_prompt, user_prompt, CHAT_RESPONSE_SCHEMA, "chat_response", temperature=0.35)
+    if not structured:
+        structured = _fallback_chat_response(question, style_key, mode_key, recent_history)
+
+    answer = str(structured.get("answer") or base_text or _fallback_response(question, style_key)).strip()
+    summary = str(structured.get("summary") or answer[:180]).strip()
+    key_points = structured.get("key_points") or _key_points_from_text(answer, limit=5)
+    if not key_points:
+        key_points = ["Clarify the goal", "Break the problem into steps", "Test the edge cases"]
+    example = str(structured.get("example") or "").strip()
+    code_sample = str(structured.get("code_sample") or "").strip() or _code_sample_for_topic(question, style_key, base_assets)
+    practice = str(structured.get("practice") or "").strip()
+    quiz_question = str(structured.get("quiz_question") or "").strip()
+    quiz_options = structured.get("quiz_options") or []
+    if not isinstance(quiz_options, list):
+        quiz_options = []
+    follow_up_prompts = structured.get("follow_up_prompts") or []
+    if not isinstance(follow_up_prompts, list):
+        follow_up_prompts = []
+    follow_up_prompts_clean = [str(item).strip() for item in follow_up_prompts[:4] if str(item).strip()]
+    next_step = str(structured.get("next_step") or "").strip()
+    confidence = str(structured.get("confidence") or "High").strip().title()
+    if confidence not in {"High", "Medium", "Low"}:
+        confidence = "High"
 
     return {
+        "title": str(structured.get("title") or _safe_label(question or "Conversation", 40)).strip(),
+        "summary": summary,
         "answer": answer,
         "text": answer,
+        "key_points": [str(item).strip() for item in key_points[:5] if str(item).strip()],
+        "example": example,
+        "code_sample": code_sample,
+        "practice": practice,
+        "quiz_question": quiz_question,
+        "quiz_options": [str(item).strip() for item in quiz_options[:4] if str(item).strip()],
+        "next_step": next_step,
+        "confidence": confidence,
         "response_type": base.get("response_type", style_key),
         "ai_used": bool(base.get("ai_used")),
-        "assets": base.get("assets", {}),
-        "follow_up_prompts": _generate_prompt_suggestions(question, style_key)[:4],
+        "assets": {
+            **base_assets,
+            "quiz_options": [str(item).strip() for item in quiz_options[:4] if str(item).strip()],
+        },
+        "follow_up_prompts": follow_up_prompts_clean or _generate_prompt_suggestions(question, style_key)[:4],
         "mode": mode_key,
         "style": style_key,
     }

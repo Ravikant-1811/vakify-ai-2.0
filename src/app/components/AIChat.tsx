@@ -17,11 +17,22 @@ import { apiFetch } from '../lib/api';
 type ConfidenceLevel = 'High' | 'Medium' | 'Low';
 
 type ChatPayload = {
+  title?: string;
+  summary?: string;
   answer?: string;
   text?: string;
+  key_points?: string[];
+  example?: string;
+  code_sample?: string;
+  practice?: string;
+  quiz_question?: string;
+  quiz_options?: string[];
   follow_up_prompts?: string[];
+  next_step?: string;
   response_type?: string;
   confidence?: ConfidenceLevel;
+  mode?: string;
+  style?: string;
   chat_id?: number;
   thread_id?: number;
   thread_title?: string;
@@ -44,6 +55,7 @@ interface Message {
   timestamp: Date;
   chatId?: number;
   followUps?: string[];
+  structured?: ChatPayload;
 }
 
 export function AIChat() {
@@ -191,6 +203,7 @@ export function AIChat() {
         timestamp: new Date(),
         followUps: response.follow_up_prompts?.slice(0, 4) || [],
         chatId: response.chat_id,
+        structured: response,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -214,7 +227,7 @@ export function AIChat() {
   };
 
   const copyMessage = async (message: Message) => {
-    await navigator.clipboard.writeText(message.content);
+    await navigator.clipboard.writeText(buildClipboardText(message));
     setCopiedId(message.id);
     window.setTimeout(() => setCopiedId(null), 1200);
   };
@@ -257,6 +270,7 @@ export function AIChat() {
         timestamp: new Date(row.timestamp),
         chatId: row.chat_id,
         followUps: parsed?.follow_up_prompts?.slice(0, 4) || [],
+        structured: parsed || undefined,
       });
     });
     return restored;
@@ -440,9 +454,7 @@ export function AIChat() {
                       </div>
                     </div>
 
-                    <div className="space-y-4 text-sm leading-7 text-foreground/95">
-                      {renderRichContent(message.content)}
-                    </div>
+                    {renderStructuredAssistant(message, (prompt) => void handleSend(prompt))}
 
                     <div className="flex items-center gap-3 pt-4 mt-5 border-t border-border/70 flex-wrap">
                       <button
@@ -529,6 +541,194 @@ export function AIChat() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function buildClipboardText(message: Message) {
+  const structured = message.structured;
+  if (!structured) {
+    return message.content;
+  }
+
+  const lines: string[] = [];
+  if (structured.title) lines.push(structured.title, '');
+  if (structured.summary) lines.push(`Summary: ${structured.summary}`, '');
+  if (structured.answer) lines.push(`Answer:\n${structured.answer}`, '');
+  if (structured.key_points?.length) {
+    lines.push('Key points:');
+    structured.key_points.forEach((point, index) => lines.push(`${index + 1}. ${point}`));
+    lines.push('');
+  }
+  if (structured.example) lines.push(`Example:\n${structured.example}`, '');
+  if (structured.code_sample) lines.push(`Code sample:\n${structured.code_sample}`, '');
+  if (structured.practice) lines.push(`Practice:\n${structured.practice}`, '');
+  if (structured.quiz_question) lines.push(`Quick check:\n${structured.quiz_question}`, '');
+  if (structured.next_step) lines.push(`Next step:\n${structured.next_step}`, '');
+  if (structured.follow_up_prompts?.length) {
+    lines.push('Follow-up prompts:');
+    structured.follow_up_prompts.forEach((prompt, index) => lines.push(`${index + 1}. ${prompt}`));
+  }
+  return lines.join('\n').trim();
+}
+
+function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: string) => void) {
+  const structured = message.structured;
+  if (!structured) {
+    return <div className="space-y-4 text-sm leading-7 text-foreground/95">{renderRichContent(message.content)}</div>;
+  }
+
+  const keyPoints = (structured.key_points || []).filter(Boolean);
+  const followUps = (structured.follow_up_prompts || []).filter(Boolean);
+  const quizOptions = (structured.quiz_options || []).filter(Boolean);
+  const hasExample = Boolean(structured.example?.trim());
+  const hasCode = Boolean(structured.code_sample?.trim());
+  const hasPractice = Boolean(structured.practice?.trim());
+  const hasQuiz = Boolean(structured.quiz_question?.trim() || quizOptions.length);
+  const hasNextStep = Boolean(structured.next_step?.trim());
+
+  return (
+    <div className="space-y-5 text-sm leading-7 text-foreground/95">
+      <div className="rounded-3xl border border-border/70 bg-gradient-to-r from-secondary/10 via-card to-background px-4 py-4 md:px-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Output Template</div>
+            <div className="mt-1 text-lg font-semibold leading-tight text-foreground">
+              {structured.title || 'Structured response'}
+            </div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              {structured.summary || 'A concise overview with answer, examples, and next steps.'}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-2 text-xs">
+            <span className="rounded-full bg-emerald-500/10 px-3 py-1 font-medium text-emerald-700">
+              Confidence: {message.confidence || structured.confidence || 'High'}
+            </span>
+            <div className="flex flex-wrap justify-end gap-2">
+              {structured.mode ? <span className="rounded-full bg-muted px-2.5 py-1 text-muted-foreground">{structured.mode}</span> : null}
+              {structured.style ? <span className="rounded-full bg-muted px-2.5 py-1 text-muted-foreground">{structured.style}</span> : null}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Main Answer</div>
+            <div className="text-sm text-muted-foreground">A natural explanation, written clearly and directly.</div>
+          </div>
+          <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
+            {structured.response_type || 'assistant'}
+          </span>
+        </div>
+        <div className="space-y-4">
+          {renderRichContent(structured.answer || message.content)}
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-12">
+        <div className="rounded-3xl border border-border/70 bg-background px-4 py-4 md:px-5 xl:col-span-7">
+          <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Key Takeaways</div>
+          <div className="mt-3 space-y-3">
+            {keyPoints.length ? (
+              keyPoints.slice(0, 5).map((point, index) => (
+                <div key={index} className="flex gap-3 rounded-2xl border border-border/60 bg-muted/20 px-3 py-3">
+                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-secondary/10 text-xs font-semibold text-secondary">
+                    {index + 1}
+                  </div>
+                  <div className="text-sm leading-6 text-foreground/90">{renderInline(point)}</div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-border/70 px-3 py-4 text-sm text-muted-foreground">
+                No key points were returned for this answer.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4 xl:col-span-5">
+          {hasExample ? (
+            <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Example</div>
+              <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.example || '')}</div>
+            </div>
+          ) : null}
+
+          {hasNextStep ? (
+            <div className="rounded-3xl border border-border/70 bg-gradient-to-br from-secondary/10 to-background px-4 py-4 md:px-5">
+              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Next Step</div>
+              <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.next_step || '')}</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {hasCode ? (
+        <div className="rounded-3xl border border-border/70 bg-slate-950 text-slate-50 px-4 py-4 md:px-5 shadow-[0_10px_30px_-22px_rgba(15,23,42,0.7)]">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.28em] text-slate-300/70">Code Sample</div>
+              <div className="text-sm text-slate-300/90">Copy, edit, and run this snippet in the lab.</div>
+            </div>
+            <button
+              onClick={() => void navigator.clipboard.writeText(structured.code_sample || '')}
+              className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-white/10 transition-colors"
+            >
+              Copy code
+            </button>
+          </div>
+          <pre className="overflow-x-auto text-xs leading-6 text-slate-100">
+            <code>{structured.code_sample}</code>
+          </pre>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        {hasPractice ? (
+          <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+            <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Practice</div>
+            <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.practice || '')}</div>
+          </div>
+        ) : null}
+
+        {hasQuiz ? (
+          <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+            <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Quick Check</div>
+            <div className="mt-3 text-base font-semibold text-foreground">{structured.quiz_question || 'Quick check'}</div>
+            {quizOptions.length ? (
+              <div className="mt-4 space-y-2">
+                {quizOptions.map((option) => (
+                  <button
+                    key={option}
+                    className="w-full rounded-2xl border border-border/70 bg-muted/20 px-4 py-3 text-left text-sm hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {followUps.length ? (
+        <div className="rounded-3xl border border-border/70 bg-background px-4 py-4 md:px-5">
+          <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Follow-up prompts</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {followUps.map((prompt) => (
+              <button
+                key={prompt}
+                onClick={() => onFollowUpPrompt(prompt)}
+                className="rounded-full border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
