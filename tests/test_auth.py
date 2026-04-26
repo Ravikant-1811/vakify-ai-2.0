@@ -6,6 +6,9 @@ def _client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-jwt-secret")
     monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "google-client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "google-client-secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost:5173/auth/google/callback")
     app = create_app()
     app.config.update(TESTING=True)
     return app.test_client()
@@ -67,3 +70,51 @@ def test_login_rejects_bad_password(tmp_path, monkeypatch):
         },
     )
     assert login.status_code == 401
+
+
+def test_google_config_and_exchange(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    config = client.get("/api/auth/google/config")
+    assert config.status_code == 200
+    assert config.get_json()["client_id"] == "google-client-id"
+
+    from app.routes import auth as auth_routes
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, data=None, timeout=None):
+        assert url == auth_routes.GOOGLE_TOKEN_URL
+        return FakeResponse(200, {"id_token": "google-id-token"})
+
+    def fake_get(url, params=None, timeout=None):
+        assert url == auth_routes.GOOGLE_TOKENINFO_URL
+        return FakeResponse(
+            200,
+            {
+                "email": "google@example.com",
+                "name": "Google Learner",
+                "aud": "google-client-id",
+            },
+        )
+
+    monkeypatch.setattr(auth_routes.requests, "post", fake_post)
+    monkeypatch.setattr(auth_routes.requests, "get", fake_get)
+
+    exchange = client.post(
+        "/api/auth/google/exchange",
+        json={
+            "code": "fake-code",
+            "redirect_uri": "http://localhost:5173/auth/google/callback",
+        },
+    )
+    assert exchange.status_code == 200
+    data = exchange.get_json()
+    assert data["user"]["email"] == "google@example.com"
+    assert data["user"]["displayName"] == "Google Learner"

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
+import { GoogleCallback } from './components/GoogleCallback';
 import { Onboarding } from './components/Onboarding';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -69,6 +70,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/auth/google/callback" element={<GoogleCallback />} />
       <Route path="/onboarding" element={user && !user.onboarded ? <Onboarding /> : <Navigate to="/dashboard" replace />} />
 
       <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />

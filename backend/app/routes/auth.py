@@ -1,8 +1,10 @@
 import secrets
+import os
 
 from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+import requests
 from app.extensions import db
 from app.models import LearningStyle, PracticeActivity, RewardWallet, User, UserProfile, UserStreak, WeeklyQuizAttempt
 from app.services.admin_auth import get_role_for_email, is_admin_email
@@ -10,6 +12,26 @@ from app.services.user_cleanup import delete_user_with_related_data
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5173/auth/google/callback").strip()
+
+
+def _google_client_id() -> str:
+    return os.getenv("GOOGLE_CLIENT_ID", "").strip()
+
+
+def _google_client_secret() -> str:
+    return os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+
+
+def _google_config() -> dict:
+    return {
+        "client_id": _google_client_id(),
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "auth_url": GOOGLE_AUTH_URL,
+    }
 
 
 def _ensure_wallet(user_id: int) -> RewardWallet:
@@ -181,33 +203,6 @@ def register():
     return jsonify({"access_token": token, "user": _serialize_user(user)})
 
 
-@auth_bp.post("/login")
-def login():
-    data = request.get_json() or {}
-    email = str(data.get("email", "")).strip().lower()
-    password = str(data.get("password", ""))
-
-    if not email or not password:
-        return jsonify({"error": "email and password are required"}), 400
-
-    user = User.query.filter_by(email=email).first()
-    if not user or not check_password_hash(user.password_hash, password):
-        return jsonify({"error": "invalid credentials"}), 401
-
-    token = _issue_token(user)
-    return jsonify({"access_token": token, "user": _serialize_user(user)})
-
-
-@auth_bp.post("/login-user")
-def login_user():
-    return login()
-
-
-@auth_bp.post("/login-admin")
-def login_admin():
-    return login()
-
-
 @auth_bp.get("/me")
 @jwt_required()
 def me():
@@ -221,6 +216,118 @@ def me():
     payload["name"] = user.name
     payload["is_admin"] = is_admin_email(user.email)
     return jsonify(payload)
+
+
+@auth_bp.get("/google/config")
+def google_config():
+    config = _google_config()
+    if not config["client_id"]:
+        return jsonify({"error": "google oauth is not configured"}), 503
+    return jsonify(config)
+
+
+def _login_with_password(email: str, password: str):
+    if not email or not password:
+        return jsonify({"error": "email and password are required"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({"error": "invalid credentials"}), 401
+
+    token = _issue_token(user)
+    return jsonify({"access_token": token, "user": _serialize_user(user)})
+
+
+@auth_bp.post("/login")
+def login():
+    data = request.get_json() or {}
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", ""))
+    return _login_with_password(email, password)
+
+
+@auth_bp.post("/login-user")
+def login_user():
+    data = request.get_json() or {}
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", ""))
+    return _login_with_password(email, password)
+
+
+@auth_bp.post("/login-admin")
+def login_admin():
+    data = request.get_json() or {}
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", ""))
+    return _login_with_password(email, password)
+
+
+@auth_bp.post("/google/exchange")
+def google_exchange():
+    data = request.get_json(silent=True) or {}
+    code = str(data.get("code", "")).strip()
+    redirect_uri = str(data.get("redirect_uri", "")).strip() or GOOGLE_REDIRECT_URI
+
+    if not code:
+        return jsonify({"error": "code is required"}), 400
+
+    config = _google_config()
+    if not config["client_id"] or not _google_client_secret():
+        return jsonify({"error": "google oauth is not configured"}), 503
+
+    if redirect_uri != config["redirect_uri"]:
+        return jsonify({"error": "redirect_uri mismatch"}), 400
+
+    token_response = requests.post(
+        GOOGLE_TOKEN_URL,
+        data={
+            "code": code,
+            "client_id": config["client_id"],
+            "client_secret": _google_client_secret(),
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        },
+        timeout=20,
+    )
+    if token_response.status_code != 200:
+        return jsonify({"error": "google token exchange failed"}), 400
+
+    token_payload = token_response.json() or {}
+    id_token = str(token_payload.get("id_token", "")).strip()
+    if not id_token:
+        return jsonify({"error": "google id_token missing"}), 400
+
+    info_response = requests.get(GOOGLE_TOKENINFO_URL, params={"id_token": id_token}, timeout=20)
+    if info_response.status_code != 200:
+        return jsonify({"error": "google token verification failed"}), 400
+
+    profile = info_response.json() or {}
+    email = str(profile.get("email", "")).strip().lower()
+    name = str(profile.get("name", "")).strip() or profile.get("given_name") or "Learner"
+    audience = str(profile.get("aud", "")).strip()
+    if not email:
+        return jsonify({"error": "google email missing"}), 400
+    if audience and audience != config["client_id"]:
+        return jsonify({"error": "google audience mismatch"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        user = User(
+            name=name,
+            email=email,
+            password_hash=generate_password_hash(secrets.token_urlsafe(32)),
+        )
+        db.session.add(user)
+        db.session.flush()
+        _ensure_wallet(user.user_id)
+        _ensure_streak(user.user_id)
+        _ensure_profile(user.user_id)
+    elif name and user.name != name:
+        user.name = name
+
+    db.session.commit()
+    token = _issue_token(user)
+    return jsonify({"access_token": token, "user": _serialize_user(user)})
 
 
 @auth_bp.put("/me")

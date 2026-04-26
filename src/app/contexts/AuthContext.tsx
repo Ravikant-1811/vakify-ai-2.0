@@ -26,6 +26,8 @@ interface AuthContextType {
   user: User | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
+  beginGoogleLogin: () => Promise<void>;
+  completeGoogleLogin: (code: string, state?: string | null) => Promise<void>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => void;
   updateUser: (updates: Partial<User>) => Promise<void>;
@@ -65,6 +67,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ email, password }),
       skipAuth: true,
     });
+    setAuthToken(response.access_token ? String(response.access_token) : null);
+    setUser(mapUser(response.user));
+  };
+
+  const beginGoogleLogin = async () => {
+    const config = await apiFetch<Record<string, any>>('/api/auth/google/config', { skipAuth: true });
+    const clientId = String(config.client_id || '').trim();
+    const redirectUri = String(config.redirect_uri || '').trim();
+    if (!clientId || !redirectUri) {
+      throw new Error('Google login is not configured yet.');
+    }
+
+    const state = crypto.randomUUID();
+    window.sessionStorage.setItem('vakify.google_oauth_state', state);
+    window.sessionStorage.setItem('vakify.google_oauth_redirect', redirectUri);
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      prompt: 'select_account',
+      access_type: 'offline',
+      state,
+    });
+    window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  };
+
+  const completeGoogleLogin = async (code: string, state?: string | null) => {
+    const expectedState = window.sessionStorage.getItem('vakify.google_oauth_state');
+    const redirectUri = window.sessionStorage.getItem('vakify.google_oauth_redirect') || `${window.location.origin}/auth/google/callback`;
+    if (expectedState && state && expectedState !== state) {
+      throw new Error('Google login state did not match. Please try again.');
+    }
+
+    const response = await apiFetch<Record<string, any>>('/api/auth/google/exchange', {
+      method: 'POST',
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+      skipAuth: true,
+    });
+    window.sessionStorage.removeItem('vakify.google_oauth_state');
+    window.sessionStorage.removeItem('vakify.google_oauth_redirect');
     setAuthToken(response.access_token ? String(response.access_token) : null);
     setUser(mapUser(response.user));
   };
@@ -120,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, ready, login, signup, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, ready, login, beginGoogleLogin, completeGoogleLogin, signup, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );
