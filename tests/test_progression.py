@@ -41,6 +41,12 @@ def test_language_aware_daily_and_weekly_progression(tmp_path, monkeypatch):
     )
     assert profile_update.status_code == 200
 
+    seeded_me = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert seeded_me.status_code == 200
+
     today = client.get(
         "/api/tasks/today",
         headers={"Authorization": f"Bearer {token}"},

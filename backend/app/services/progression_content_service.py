@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date, timedelta
+
+from app.extensions import db
+from app.models import DailyTask, UserProfile, WeeklyQuiz
 
 
 def normalize_language(language: str | None) -> str:
@@ -580,6 +584,12 @@ def _copy_questions(items: list[dict]) -> list[dict]:
     return [deepcopy(item) for item in items]
 
 
+def _preferred_language(profile: UserProfile | None) -> str:
+    if profile and isinstance(profile.preferred_languages, list) and profile.preferred_languages:
+        return normalize_language(profile.preferred_languages[0])
+    return "python"
+
+
 def build_daily_task_bundle(language: str | None, difficulty: str | None) -> list[dict]:
     key = normalize_language(language)
     bank = LANGUAGE_BANKS[key]
@@ -637,3 +647,38 @@ def build_weekly_quiz_bundle(language: str | None, difficulty: str | None) -> di
         "week_topic": f"{label} Core Concepts",
         "task_key": f"{key}-weekly-quiz",
     }
+
+
+def ensure_daily_and_weekly_progression(user_id: int, profile: UserProfile, today: date) -> None:
+    daily_rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).all()
+    if not daily_rows:
+        for item in build_daily_task_bundle(_preferred_language(profile), profile.difficulty_level or "beginner"):
+            db.session.add(
+                DailyTask(
+                    user_id=user_id,
+                    title=item["title"],
+                    description=item["description"],
+                    task_type=item["task_type"],
+                    difficulty=profile.difficulty_level or "beginner",
+                    status="assigned",
+                    points_reward=item["points_reward"],
+                    content_json=item["content_json"],
+                    due_date=today,
+                )
+            )
+
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    quiz = WeeklyQuiz.query.filter_by(user_id=user_id, week_start=week_start).first()
+    if not quiz:
+        bundle = build_weekly_quiz_bundle(_preferred_language(profile), profile.difficulty_level or "beginner")
+        db.session.add(
+            WeeklyQuiz(
+                user_id=user_id,
+                title=f"{bundle['title']} ({week_start.isocalendar()[0]}-W{week_start.isocalendar()[1]:02d})",
+                week_start=week_start,
+                week_end=week_end,
+                difficulty=bundle["difficulty"],
+                question_payload=bundle["questions"],
+            )
+        )

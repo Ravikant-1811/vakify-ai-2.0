@@ -155,6 +155,9 @@ export function TasksQuiz() {
       });
       await refreshUser();
       await loadData();
+      if (passed) {
+        setQuizModal(null);
+      }
     } catch (error) {
       setQuizResult({
         score: 0,
@@ -393,10 +396,10 @@ export function TasksQuiz() {
                 )
               }
               className="w-full bg-white text-primary py-4 rounded-lg hover:bg-white/90 transition-colors flex items-center justify-center gap-2"
-            >
-              <Clock className="w-5 h-5" />
-              Start Quiz Now
-            </button>
+              >
+                <Clock className="w-5 h-5" />
+              {weeklyAttempts > 0 ? 'Retake Weekly Quiz' : 'Start Quiz Now'}
+              </button>
           </div>
 
           <div className="bg-card border border-border rounded-xl p-6 shadow-sm">

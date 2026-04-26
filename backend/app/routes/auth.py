@@ -1,3 +1,4 @@
+from datetime import datetime
 import secrets
 import os
 
@@ -8,6 +9,7 @@ import requests
 from app.extensions import db
 from app.models import LearningStyle, PracticeActivity, RewardWallet, User, UserProfile, UserStreak, WeeklyQuizAttempt
 from app.services.admin_auth import get_role_for_email, is_admin_email
+from app.services.progression_content_service import ensure_daily_and_weekly_progression
 from app.services.user_cleanup import delete_user_with_related_data
 
 
@@ -199,6 +201,9 @@ def register():
         return jsonify({"error": "email already exists"}), 409
 
     user = _find_or_create_user(email=email, name=name, password=password)
+    profile = _ensure_profile(user.user_id)
+    ensure_daily_and_weekly_progression(user.user_id, profile, datetime.utcnow().date())
+    db.session.commit()
     token = _issue_token(user)
     return jsonify({"access_token": token, "user": _serialize_user(user)})
 
@@ -210,6 +215,10 @@ def me():
     user = db.session.get(User, user_id)
     if not user:
         return jsonify({"error": "user not found"}), 404
+
+    profile = _ensure_profile(user_id)
+    ensure_daily_and_weekly_progression(user_id, profile, datetime.utcnow().date())
+    db.session.commit()
 
     payload = _serialize_user(user)
     payload["user_id"] = user.user_id
@@ -366,6 +375,8 @@ def update_me():
             profile_updates[field] = data[field]
     if profile_updates:
         _touch_profile(user_id, profile_updates)
+        profile = _ensure_profile(user_id)
+        ensure_daily_and_weekly_progression(user_id, profile, datetime.utcnow().date())
 
     db.session.commit()
     return jsonify(
