@@ -7,6 +7,7 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { AIChat } from './components/AIChat';
 import { CodingLab } from './components/CodingLab';
+import { TrainingCoder } from './components/TrainingCoder';
 import { TasksQuiz } from './components/TasksQuiz';
 import { Rewards } from './components/Rewards';
 import { Insights } from './components/Insights';
@@ -76,6 +77,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
       <Route path="/chat" element={<PrivateRoute><AIChat /></PrivateRoute>} />
       <Route path="/lab" element={<PrivateRoute><CodingLab /></PrivateRoute>} />
+      <Route path="/playground" element={<PrivateRoute><TrainingCoder /></PrivateRoute>} />
       <Route path="/tasks" element={<PrivateRoute><TasksQuiz /></PrivateRoute>} />
       <Route path="/rewards" element={<PrivateRoute><Rewards /></PrivateRoute>} />
       <Route path="/insights" element={<PrivateRoute><Insights /></PrivateRoute>} />

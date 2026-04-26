@@ -247,7 +247,7 @@ export function CodingLab() {
     <div className="min-h-[calc(100vh-4rem)] flex flex-col p-6 max-w-7xl mx-auto gap-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl mb-2">Coding Lab</h1>
+          <h1 className="text-3xl mb-2">Chat Sync Lab</h1>
           <p className="text-muted-foreground max-w-4xl">
             Practice coding with instant feedback, live input, and tasks you choose from your chat history.
           </p>

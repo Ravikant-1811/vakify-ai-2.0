@@ -32,7 +32,8 @@ export function Layout({ children }: LayoutProps) {
   const learnerNav = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
     { icon: MessageSquare, label: 'AI Chat', path: '/chat' },
-    { icon: Code, label: 'Coding Lab', path: '/lab' },
+    { icon: Code, label: 'Chat Sync Lab', path: '/lab' },
+    { icon: Code, label: 'Training Coder', path: '/playground' },
     { icon: CheckSquare, label: 'Tasks & Quiz', path: '/tasks' },
     { icon: Trophy, label: 'Rewards', path: '/rewards' },
     { icon: TrendingUp, label: 'Insights', path: '/insights' },
