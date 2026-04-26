@@ -150,6 +150,17 @@ def test_code_lab_runs_python(tmp_path, monkeypatch):
     assert isinstance(data["tests"], list)
     assert data["passed_tests"] >= 1
 
+    workspace = client.get(
+        f"/api/lab/workspace?workspace_type=chat&language=python&task_id={synced_task['task_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workspace.status_code == 200
+    workspace_data = workspace.get_json()["workspace"]
+    assert workspace_data["code"].strip() == synced_task["starter_code"].strip()
+    assert workspace_data["stdin"] == synced_task["sample_input"]
+    assert workspace_data["last_output"] != ""
+    assert workspace_data["last_tests_json"]
+
     submissions = client.get(
         "/api/lab/submissions",
         headers={"Authorization": f"Bearer {token}"},

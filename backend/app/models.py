@@ -284,6 +284,28 @@ class CodeLabSubmission(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class LabWorkspaceState(db.Model):
+    __tablename__ = "lab_workspace_states"
+
+    state_id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
+    workspace_type = db.Column(db.String(20), nullable=False, index=True)  # chat, training
+    language = db.Column(db.String(20), nullable=False, index=True)
+    task_id = db.Column(db.Integer, nullable=True, index=True)
+    chat_id = db.Column(db.Integer, db.ForeignKey("chat_history.chat_id"), nullable=True, index=True)
+    thread_id = db.Column(db.Integer, db.ForeignKey("chat_threads.thread_id"), nullable=True, index=True)
+    source_task_key = db.Column(db.String(120), nullable=True, index=True)
+    code = db.Column(db.Text, nullable=True)
+    stdin = db.Column(db.Text, nullable=True)
+    last_output = db.Column(db.Text, nullable=True)
+    last_error = db.Column(db.Text, nullable=True)
+    last_tests_json = db.Column(db.JSON, nullable=True)
+    last_score = db.Column(db.Integer, default=0, nullable=False)
+    last_status = db.Column(db.String(20), default="draft", nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class ModerationItem(db.Model):
     __tablename__ = "moderation_items"
 

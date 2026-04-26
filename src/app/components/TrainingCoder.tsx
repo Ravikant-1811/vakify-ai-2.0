@@ -49,6 +49,22 @@ type DailyTaskPayload = {
   };
 };
 
+type WorkspaceState = {
+  workspace: {
+    state_id?: number | null;
+    workspace_type: string;
+    language: string;
+    task_id?: number | null;
+    code: string;
+    stdin: string;
+    last_output: string;
+    last_error: string;
+    last_tests_json: Array<{ name: string; passed: boolean }>;
+    last_score: number;
+    last_status: string;
+  };
+};
+
 const languages = [
   { id: 'python', name: 'Python' },
   { id: 'javascript', name: 'JavaScript' },
@@ -68,6 +84,7 @@ export function TrainingCoder() {
   const [output, setOutput] = useState('');
   const [tests, setTests] = useState<Array<{ name: string; passed: boolean }>>([]);
   const [running, setRunning] = useState(false);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
 
   useEffect(() => {
     const taskId = searchParams.get('task_id');
@@ -88,17 +105,15 @@ export function TrainingCoder() {
         if (data.content?.language) {
           setSelectedLanguage(data.content.language);
         }
-        const codeKey = `vakify.training.code.task.${taskId}`;
-        const stdinKey = `vakify.training.stdin.task.${taskId}`;
-        const savedCode = window.localStorage.getItem(codeKey);
-        const savedStdin = window.localStorage.getItem(stdinKey);
-        setCode(savedCode ?? data.content?.starter_code ?? '');
-        setStdin(savedStdin ?? data.content?.sample_input ?? '');
+        setWorkspaceReady(false);
+        setCode(data.content?.starter_code ?? '');
+        setStdin(data.content?.sample_input ?? '');
         setOutput('');
         setTests([]);
       } catch {
         if (!cancelled) {
           setTask(null);
+          setWorkspaceReady(false);
         }
       } finally {
         if (!cancelled) {
@@ -114,49 +129,102 @@ export function TrainingCoder() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (task) {
+    let cancelled = false;
+    const loadWorkspace = async () => {
+      setWorkspaceReady(false);
+      try {
+        const params = new URLSearchParams({
+          workspace_type: 'training',
+          language: selectedLanguage,
+        });
+        if (task?.task_id) {
+          params.set('task_id', String(task.task_id));
+        }
+        const data = await apiFetch<WorkspaceState>(`/api/lab/workspace?${params.toString()}`);
+        if (cancelled) {
+          return;
+        }
+        const workspace = data.workspace;
+        if (workspace?.state_id != null) {
+          setCode(workspace.code ?? '');
+          setStdin(workspace.stdin ?? '');
+          setOutput(workspace.last_output ?? '');
+          setTests(workspace.last_tests_json || []);
+        } else if (task) {
+          setCode(task.content?.starter_code ?? '');
+          setStdin(task.content?.sample_input ?? '');
+          setOutput('');
+          setTests([]);
+        } else {
+          setCode('');
+          setStdin('');
+          setOutput('');
+          setTests([]);
+        }
+      } catch {
+        // fall back to starter code / blank editor if the backend is unavailable
+      } finally {
+        if (!cancelled) {
+          setWorkspaceReady(true);
+        }
+      }
+    };
+
+    void loadWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLanguage, task?.task_id]);
+
+  useEffect(() => {
+    if (!workspaceReady) {
       return;
     }
-    const codeKey = `vakify.training.code.${selectedLanguage}`;
-    const stdinKey = `vakify.training.stdin.${selectedLanguage}`;
-    const savedCode = window.localStorage.getItem(codeKey);
-    const savedStdin = window.localStorage.getItem(stdinKey);
-    setCode(savedCode ?? '');
-    setStdin(savedStdin ?? '');
-    setOutput('');
-    setTests([]);
-  }, [selectedLanguage, task]);
 
-  useEffect(() => {
-    if (task?.task_id) {
-      window.localStorage.setItem(`vakify.training.code.task.${task.task_id}`, code);
-    } else {
-      window.localStorage.setItem(`vakify.training.code.${selectedLanguage}`, code);
-    }
-  }, [code, selectedLanguage, task?.task_id]);
+    const timer = window.setTimeout(() => {
+      void apiFetch('/api/lab/workspace', {
+        method: 'PUT',
+        body: JSON.stringify({
+          workspace_type: 'training',
+          language: selectedLanguage,
+          task_id: task?.task_id ?? null,
+          code,
+          stdin,
+          source_task_key: task?.content?.task_key ?? null,
+        }),
+      }).catch(() => {
+        // keep local editing responsive if the autosave request fails
+      });
+    }, 500);
 
-  useEffect(() => {
-    if (task?.task_id) {
-      window.localStorage.setItem(`vakify.training.stdin.task.${task.task_id}`, stdin);
-    } else {
-      window.localStorage.setItem(`vakify.training.stdin.${selectedLanguage}`, stdin);
-    }
-  }, [stdin, selectedLanguage, task?.task_id]);
+    return () => window.clearTimeout(timer);
+  }, [code, stdin, selectedLanguage, task?.task_id, task?.content?.task_key, workspaceReady]);
 
   const resetBlank = () => {
-    if (task?.task_id) {
-      window.localStorage.removeItem(`vakify.training.code.task.${task.task_id}`);
-      window.localStorage.removeItem(`vakify.training.stdin.task.${task.task_id}`);
-      setSearchParams({});
-      setTask(null);
-    } else {
-      window.localStorage.removeItem(`vakify.training.code.${selectedLanguage}`);
-      window.localStorage.removeItem(`vakify.training.stdin.${selectedLanguage}`);
-    }
     setCode('');
     setStdin('');
     setOutput('');
     setTests([]);
+    void apiFetch('/api/lab/workspace', {
+      method: 'PUT',
+      body: JSON.stringify({
+        workspace_type: 'training',
+        language: selectedLanguage,
+        task_id: task?.task_id ?? null,
+        code: '',
+        stdin: '',
+        source_task_key: task?.content?.task_key ?? null,
+        last_output: '',
+        last_error: '',
+        last_tests_json: [],
+        last_score: 0,
+        last_status: 'draft',
+      }),
+    }).catch(() => {});
+    if (task?.task_id) {
+      setSearchParams({});
+      setTask(null);
+    }
   };
 
   const handleLanguageChange = (language: string) => {

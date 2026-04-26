@@ -114,3 +114,53 @@ def test_language_aware_daily_and_weekly_progression(tmp_path, monkeypatch):
     assert rewards.status_code == 200
     rewards_data = rewards.get_json()
     assert rewards_data["wallet"]["reward_points"] >= quiz_result["xp_awarded"] + code_result["xp_awarded"] + weekly_result["xp_awarded"]
+
+
+def test_training_workspace_persists_draft_and_run_state(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    token = _register(client, "workspace@example.com", "Workspace Learner")
+
+    saved = client.put(
+        "/api/lab/workspace",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "workspace_type": "training",
+            "language": "python",
+            "code": "print('hello from db')",
+            "stdin": "12\n",
+            "last_status": "draft",
+        },
+    )
+    assert saved.status_code == 200
+
+    loaded = client.get(
+        "/api/lab/workspace?workspace_type=training&language=python",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert loaded.status_code == 200
+    loaded_data = loaded.get_json()["workspace"]
+    assert loaded_data["code"] == "print('hello from db')"
+    assert loaded_data["stdin"] == "12\n"
+
+    run = client.post(
+        "/api/lab/run",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "language": "python",
+            "source_code": "print('hello from db')",
+            "stdin": "12\n",
+        },
+    )
+    assert run.status_code == 200
+    run_data = run.get_json()
+    assert "stdout" in run_data
+
+    persisted = client.get(
+        "/api/lab/workspace?workspace_type=training&language=python",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert persisted.status_code == 200
+    persisted_data = persisted.get_json()["workspace"]
+    assert persisted_data["code"] == "print('hello from db')"
+    assert persisted_data["stdin"] == "12\n"
+    assert persisted_data["last_output"] != ""

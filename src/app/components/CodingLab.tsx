@@ -61,6 +61,25 @@ type ThreadHistoryItem = {
   timestamp: string;
 };
 
+type WorkspaceState = {
+  workspace: {
+    state_id?: number | null;
+    workspace_type: string;
+    language: string;
+    task_id?: number | null;
+    chat_id?: number | null;
+    thread_id?: number | null;
+    source_task_key?: string | null;
+    code: string;
+    stdin: string;
+    last_output: string;
+    last_error: string;
+    last_tests_json: Array<{ name: string; passed: boolean }>;
+    last_score: number;
+    last_status: string;
+  };
+};
+
 const languages = [
   { id: 'python', name: 'Python' },
   { id: 'javascript', name: 'JavaScript' },
@@ -83,6 +102,7 @@ export function CodingLab() {
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [threadMessages, setThreadMessages] = useState<ThreadHistoryItem[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const selectedThread = threads.find((thread) => thread.thread_id === selectedThreadId) || null;
   const selectedChat = threadMessages.find((message) => message.chat_id === selectedChatId) || null;
 
@@ -99,6 +119,7 @@ export function CodingLab() {
         setStdin(data.sample_input || '');
         setOutput('');
         setTests([]);
+        setWorkspaceReady(false);
       } catch {
         if (!cancelled) {
           setTask(null);
@@ -106,6 +127,7 @@ export function CodingLab() {
           setStdin('');
           setOutput('Unable to load a coding task right now.');
           setTests([]);
+          setWorkspaceReady(false);
         }
       } finally {
         if (!cancelled) setLoadingTask(false);
@@ -160,28 +182,78 @@ export function CodingLab() {
   }, [selectedThreadId]);
 
   useEffect(() => {
-    const taskKey = task?.task_key || task?.task_id || 'base';
-    const storageKey = `vakify.lab.draft.${selectedLanguage}.${taskKey}`;
-    const saved = window.localStorage.getItem(storageKey);
-    if (saved) {
+    let cancelled = false;
+    const loadWorkspace = async () => {
+      setWorkspaceReady(false);
       try {
-        const parsed = JSON.parse(saved) as { code?: string; stdin?: string };
-        setCode(typeof parsed.code === 'string' ? parsed.code : task?.starter_code || '');
-        setStdin(typeof parsed.stdin === 'string' ? parsed.stdin : task?.sample_input || '');
-        return;
+        const params = new URLSearchParams({
+          workspace_type: 'chat',
+          language: selectedLanguage,
+        });
+        if (task?.task_id) {
+          params.set('task_id', String(task.task_id));
+        }
+        const data = await apiFetch<WorkspaceState>(`/api/lab/workspace?${params.toString()}`);
+        if (cancelled) {
+          return;
+        }
+        const workspace = data.workspace;
+        if (workspace.state_id != null) {
+          setCode(workspace.code ?? '');
+          setStdin(workspace.stdin ?? '');
+          setOutput(workspace.last_output ?? '');
+          setTests(workspace.last_tests_json || []);
+        } else {
+          setCode(task?.starter_code || '');
+          setStdin(task?.sample_input || '');
+          setOutput('');
+          setTests([]);
+        }
       } catch {
-        // fall back to starter code below
+        if (!cancelled) {
+          setCode(task?.starter_code || '');
+          setStdin(task?.sample_input || '');
+          setOutput('');
+          setTests([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setWorkspaceReady(true);
+        }
       }
-    }
-    setCode(task?.starter_code || '');
-    setStdin(task?.sample_input || '');
-  }, [selectedLanguage, task?.task_id, task?.task_key, task?.starter_code, task?.sample_input]);
+    };
+
+    void loadWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLanguage, task?.task_id, task?.starter_code, task?.sample_input]);
 
   useEffect(() => {
-    const taskKey = task?.task_key || task?.task_id || 'base';
-    const storageKey = `vakify.lab.draft.${selectedLanguage}.${taskKey}`;
-    window.localStorage.setItem(storageKey, JSON.stringify({ code, stdin }));
-  }, [code, stdin, selectedLanguage, task?.task_id, task?.task_key]);
+    if (!workspaceReady) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void apiFetch('/api/lab/workspace', {
+        method: 'PUT',
+        body: JSON.stringify({
+          workspace_type: 'chat',
+          language: selectedLanguage,
+          task_id: task?.task_id ?? null,
+          code,
+          stdin,
+          chat_id: task?.source_chat_id ?? null,
+          thread_id: task?.source_thread_id ?? null,
+          source_task_key: task?.task_key ?? null,
+        }),
+      }).catch(() => {
+        // keep editing fluid even if the autosave request fails
+      });
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [code, stdin, selectedLanguage, task?.task_id, task?.source_chat_id, task?.source_thread_id, task?.task_key, workspaceReady]);
 
   const syncSelectedChat = async () => {
     if (!selectedChatId) return;
@@ -196,6 +268,7 @@ export function CodingLab() {
       setStdin(data.sample_input || '');
       setOutput('');
       setTests([]);
+      setWorkspaceReady(false);
     } finally {
       setSyncingTask(false);
     }

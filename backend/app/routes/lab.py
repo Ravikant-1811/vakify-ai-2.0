@@ -1,8 +1,10 @@
+from datetime import datetime
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.extensions import db
-from app.models import ChatHistory, ChatThreadMessage, CodeLabSubmission, CodeLabTask, DailyTask
+from app.models import ChatHistory, ChatThreadMessage, CodeLabSubmission, CodeLabTask, DailyTask, LabWorkspaceState
 from app.services.code_lab_service import (
     generate_lab_task_from_chat,
     get_challenge,
@@ -128,6 +130,127 @@ def _daily_task_for_user(user_id: int, task_id: int) -> DailyTask | None:
     return DailyTask.query.filter_by(task_id=task_id, user_id=user_id).first()
 
 
+def _workspace_key(workspace_type: str, language: str, task_id: int | None) -> tuple[str, str, int | None]:
+    workspace = (workspace_type or "training").strip().lower()
+    if workspace not in {"training", "chat"}:
+        workspace = "training"
+    language_key = (language or "python").strip().lower()
+    if language_key in {"js", "node"}:
+        language_key = "javascript"
+    if language_key == "cpp":
+        language_key = "c++"
+    if language_key not in {"python", "javascript", "java", "c", "c++"}:
+        language_key = "python"
+    return workspace, language_key, task_id
+
+
+def _serialize_workspace_state(state: LabWorkspaceState | None) -> dict:
+    if not state:
+        return {
+            "state_id": None,
+            "workspace_type": "training",
+            "language": "python",
+            "task_id": None,
+            "chat_id": None,
+            "thread_id": None,
+            "source_task_key": None,
+            "code": "",
+            "stdin": "",
+            "last_output": "",
+            "last_error": "",
+            "last_tests_json": [],
+            "last_score": 0,
+            "last_status": "draft",
+            "created_at": None,
+            "updated_at": None,
+        }
+    return {
+        "state_id": state.state_id,
+        "workspace_type": state.workspace_type,
+        "language": state.language,
+        "task_id": state.task_id,
+        "chat_id": state.chat_id,
+        "thread_id": state.thread_id,
+        "source_task_key": state.source_task_key,
+        "code": state.code or "",
+        "stdin": state.stdin or "",
+        "last_output": state.last_output or "",
+        "last_error": state.last_error or "",
+        "last_tests_json": state.last_tests_json or [],
+        "last_score": state.last_score,
+        "last_status": state.last_status,
+        "created_at": state.created_at.isoformat(),
+        "updated_at": state.updated_at.isoformat(),
+    }
+
+
+def _load_workspace_state(user_id: int, workspace_type: str, language: str, task_id: int | None) -> LabWorkspaceState | None:
+    workspace, language_key, task_id = _workspace_key(workspace_type, language, task_id)
+    return LabWorkspaceState.query.filter_by(
+        user_id=user_id,
+        workspace_type=workspace,
+        language=language_key,
+        task_id=task_id,
+    ).first()
+
+
+def _upsert_workspace_state(
+    user_id: int,
+    workspace_type: str,
+    language: str,
+    task_id: int | None,
+    *,
+    code: str | None = None,
+    stdin: str | None = None,
+    chat_id: int | None = None,
+    thread_id: int | None = None,
+    source_task_key: str | None = None,
+    last_output: str | None = None,
+    last_error: str | None = None,
+    last_tests_json: list[dict] | None = None,
+    last_score: int | None = None,
+    last_status: str | None = None,
+) -> LabWorkspaceState:
+    workspace, language_key, task_id = _workspace_key(workspace_type, language, task_id)
+    state = LabWorkspaceState.query.filter_by(
+        user_id=user_id,
+        workspace_type=workspace,
+        language=language_key,
+        task_id=task_id,
+    ).first()
+    if not state:
+        state = LabWorkspaceState(
+            user_id=user_id,
+            workspace_type=workspace,
+            language=language_key,
+            task_id=task_id,
+        )
+        db.session.add(state)
+
+    if code is not None:
+        state.code = code
+    if stdin is not None:
+        state.stdin = stdin
+    if chat_id is not None:
+        state.chat_id = chat_id
+    if thread_id is not None:
+        state.thread_id = thread_id
+    if source_task_key is not None:
+        state.source_task_key = source_task_key
+    if last_output is not None:
+        state.last_output = last_output
+    if last_error is not None:
+        state.last_error = last_error
+    if last_tests_json is not None:
+        state.last_tests_json = last_tests_json
+    if last_score is not None:
+        state.last_score = last_score
+    if last_status is not None:
+        state.last_status = last_status
+    state.updated_at = datetime.utcnow()
+    return state
+
+
 @lab_bp.get("/challenges")
 @jwt_required()
 def challenges():
@@ -148,6 +271,80 @@ def current_task():
     language = (request.args.get("language") or "python").strip().lower()
     task = _current_task_for_user(user_id, language)
     return jsonify(_serialize_task(task) if task else _fallback_task_payload(language))
+
+
+@lab_bp.get("/workspace")
+@jwt_required()
+def get_workspace():
+    user_id = int(get_jwt_identity())
+    workspace_type = (request.args.get("workspace_type") or "training").strip().lower()
+    language = (request.args.get("language") or "python").strip().lower()
+    task_id_raw = request.args.get("task_id")
+    try:
+        task_id = int(task_id_raw) if task_id_raw not in {None, "", 0, "0"} else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "task_id must be a number"}), 400
+
+    state = _load_workspace_state(user_id, workspace_type, language, task_id)
+    return jsonify({"workspace": _serialize_workspace_state(state)})
+
+
+@lab_bp.put("/workspace")
+@jwt_required()
+def save_workspace():
+    user_id = int(get_jwt_identity())
+    payload = request.get_json(silent=True) or {}
+    workspace_type = str(payload.get("workspace_type", "training")).strip().lower()
+    language = str(payload.get("language", "python")).strip().lower()
+    task_id_raw = payload.get("task_id")
+    try:
+        task_id = int(task_id_raw) if task_id_raw not in {None, "", 0, "0"} else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "task_id must be a number"}), 400
+
+    code = str(payload.get("code", ""))
+    stdin = str(payload.get("stdin", ""))
+    chat_id_raw = payload.get("chat_id")
+    thread_id_raw = payload.get("thread_id")
+    try:
+        chat_id = int(chat_id_raw) if chat_id_raw not in {None, "", 0, "0"} else None
+    except (TypeError, ValueError):
+        chat_id = None
+    try:
+        thread_id = int(thread_id_raw) if thread_id_raw not in {None, "", 0, "0"} else None
+    except (TypeError, ValueError):
+        thread_id = None
+
+    source_task_key = str(payload.get("source_task_key") or "").strip() or None
+    last_output = str(payload.get("last_output") or "")
+    last_error = str(payload.get("last_error") or "")
+    last_tests_json = payload.get("last_tests_json")
+    if not isinstance(last_tests_json, list):
+        last_tests_json = None
+    try:
+        last_score = int(payload.get("last_score")) if payload.get("last_score") is not None else None
+    except (TypeError, ValueError):
+        last_score = None
+    last_status = str(payload.get("last_status") or "").strip().lower() or None
+
+    state = _upsert_workspace_state(
+        user_id,
+        workspace_type,
+        language,
+        task_id,
+        code=code,
+        stdin=stdin,
+        chat_id=chat_id,
+        thread_id=thread_id,
+        source_task_key=source_task_key,
+        last_output=last_output,
+        last_error=last_error,
+        last_tests_json=last_tests_json,
+        last_score=last_score,
+        last_status=last_status,
+    )
+    db.session.commit()
+    return jsonify({"workspace": _serialize_workspace_state(state)})
 
 
 @lab_bp.post("/task/sync")
@@ -269,6 +466,27 @@ def run():
         score=score,
     )
     db.session.add(row)
+
+    workspace_type = "chat" if task else "training"
+    workspace_task_id = task.task_id if task else daily_task.task_id if daily_task else None
+    workspace_language = result.get("language", language)
+    workspace_source_task_key = task.task_key if task else str((daily_task.content_json or {}).get("task_key") or "") if daily_task else None
+    _upsert_workspace_state(
+        user_id,
+        workspace_type,
+        workspace_language,
+        workspace_task_id,
+        code=source_code,
+        stdin=stdin_text,
+        chat_id=task.source_chat_id if task else None,
+        thread_id=task.source_thread_id if task else None,
+        source_task_key=workspace_source_task_key or None,
+        last_output=result.get("stdout", ""),
+        last_error=result.get("stderr", ""),
+        last_tests_json=tests,
+        last_score=score,
+        last_status=result.get("status", "error"),
+    )
     db.session.commit()
 
     return jsonify(

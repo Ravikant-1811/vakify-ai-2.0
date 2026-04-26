@@ -8,6 +8,7 @@ from app.models import (
     ChatThreadMessage,
     CodeLabSubmission,
     CodeLabTask,
+    LabWorkspaceState,
     DailyTask,
     DailyTaskAttempt,
     Download,
@@ -46,6 +47,7 @@ def delete_user_with_related_data(user_id: int) -> bool:
     ChatFeedback.query.filter_by(user_id=user_id).delete()
     CodeLabSubmission.query.filter_by(user_id=user_id).delete()
     CodeLabTask.query.filter_by(user_id=user_id).delete()
+    LabWorkspaceState.query.filter_by(user_id=user_id).delete()
     DailyTask.query.filter_by(user_id=user_id).delete()
     DailyTaskAttempt.query.filter_by(user_id=user_id).delete()
     WeeklyQuiz.query.filter_by(user_id=user_id).delete()
