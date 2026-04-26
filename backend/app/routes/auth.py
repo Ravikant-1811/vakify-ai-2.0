@@ -181,24 +181,6 @@ def register():
     return jsonify({"access_token": token, "user": _serialize_user(user)})
 
 
-@auth_bp.post("/clerk-login")
-def clerk_login():
-    data = request.get_json() or {}
-    email = str(data.get("email", "")).strip().lower()
-    name = str(data.get("name", "")).strip() or "Learner"
-
-    if not email:
-        return jsonify({"error": "email is required"}), 400
-
-    user = _find_or_create_user(email=email, name=name, password=None)
-    if name and user.name != name:
-        user.name = name
-        db.session.commit()
-
-    token = _issue_token(user)
-    return jsonify({"access_token": token, "user": _serialize_user(user)})
-
-
 @auth_bp.post("/login")
 def login():
     data = request.get_json() or {}

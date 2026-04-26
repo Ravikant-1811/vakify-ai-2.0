@@ -26,7 +26,6 @@ interface AuthContextType {
   user: User | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => void;
   updateUser: (updates: Partial<User>) => Promise<void>;
@@ -64,19 +63,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response = await apiFetch<Record<string, any>>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
-      skipAuth: true,
-    });
-    setAuthToken(response.access_token ? String(response.access_token) : null);
-    setUser(mapUser(response.user));
-  };
-
-  const loginWithGoogle = async () => {
-    const response = await apiFetch<Record<string, any>>('/api/auth/clerk-login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: 'user@vakify.local',
-        name: 'Learner',
-      }),
       skipAuth: true,
     });
     setAuthToken(response.access_token ? String(response.access_token) : null);
@@ -134,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, ready, login, loginWithGoogle, signup, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, ready, login, signup, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );
