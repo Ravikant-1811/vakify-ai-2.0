@@ -15,8 +15,10 @@ from app.models import (
     LearningStyle,
     PasswordResetToken,
     PracticeActivity,
+    RewardRedemption,
     RewardWallet,
     User,
+    UserRoleOverride,
     UserProfile,
     UserStreak,
     WeeklyQuiz,
@@ -54,6 +56,8 @@ def delete_user_with_related_data(user_id: int) -> bool:
     WeeklyQuizAttempt.query.filter_by(user_id=user_id).delete()
     XPEvent.query.filter_by(user_id=user_id).delete()
     RewardWallet.query.filter_by(user_id=user_id).delete()
+    RewardRedemption.query.filter_by(user_id=user_id).delete()
+    UserRoleOverride.query.filter_by(user_id=user_id).delete()
     UserProfile.query.filter_by(user_id=user_id).delete()
     UserStreak.query.filter_by(user_id=user_id).delete()
     PracticeActivity.query.filter_by(user_id=user_id).delete()

@@ -197,6 +197,18 @@ class RewardWallet(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class RewardRedemption(db.Model):
+    __tablename__ = "reward_redemptions"
+
+    redemption_id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=False, index=True)
+    reward_key = db.Column(db.String(120), nullable=False, index=True)
+    reward_name = db.Column(db.String(255), nullable=False)
+    cost = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(20), default="redeemed", nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class XPEvent(db.Model):
     __tablename__ = "xp_events"
 
@@ -240,6 +252,17 @@ class UserSettings(db.Model):
     notifications_json = db.Column(db.JSON, nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UserRoleOverride(db.Model):
+    __tablename__ = "user_role_overrides"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), primary_key=True)
+    role = db.Column(db.String(20), nullable=False, default="learner")
+    reason = db.Column(db.String(255), nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class CodeLabTask(db.Model):

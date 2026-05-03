@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 from copy import deepcopy
+from collections import Counter
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -7,12 +8,18 @@ from sqlalchemy import desc, func
 
 from app.extensions import db
 from app.models import (
+    ChatHistory,
+    CodeLabSubmission,
     DailyTask,
     DailyTaskAttempt,
+    Download,
+    LearningStyle,
+    PracticeActivity,
     RewardWallet,
     User,
     UserProfile,
     UserStreak,
+    RewardRedemption,
     WeeklyQuiz,
     WeeklyQuizAttempt,
     XPEvent,
@@ -102,6 +109,333 @@ def _award_xp(user_id: int, points: int, source: str, source_id: int | None = No
     )
     db.session.add(row)
     return wallet
+
+
+REWARD_CATALOG = [
+    {
+        "reward_key": "avatar_frame",
+        "name": "Custom Avatar Frame",
+        "cost": 500,
+        "description": "Add a premium frame to your profile card.",
+        "icon": "Crown",
+    },
+    {
+        "reward_key": "xp_boost_24h",
+        "name": "XP Boost (24h)",
+        "cost": 300,
+        "description": "Earn bonus XP for the next 24 hours.",
+        "icon": "Zap",
+    },
+    {
+        "reward_key": "priority_support",
+        "name": "Priority Support",
+        "cost": 750,
+        "description": "Move your support requests to the front of the queue.",
+        "icon": "Trophy",
+    },
+    {
+        "reward_key": "exclusive_course",
+        "name": "Unlock Exclusive Course",
+        "cost": 1000,
+        "description": "Unlock a premium course module for deeper practice.",
+        "icon": "Award",
+    },
+]
+
+BADGE_CATALOG = [
+    {
+        "name": "First Steps",
+        "description": "Complete your first task or send your first chat",
+        "icon": "🎯",
+        "threshold": "activity",
+    },
+    {
+        "name": "Code Master",
+        "description": "Complete 10 lab runs or practice submissions",
+        "icon": "💻",
+        "threshold": "code",
+    },
+    {
+        "name": "Quiz Champion",
+        "description": "Score 90%+ on a weekly quiz",
+        "icon": "🏆",
+        "threshold": "quiz",
+    },
+    {
+        "name": "Streak Legend",
+        "description": "Maintain a 7-day streak",
+        "icon": "🔥",
+        "threshold": "streak",
+    },
+    {
+        "name": "Momentum Builder",
+        "description": "Earn 500 XP",
+        "icon": "⚡",
+        "threshold": "xp",
+    },
+]
+
+
+def _normalize_token(text: str) -> str:
+    return "".join(ch for ch in text.lower() if ch.isalnum() or ch.isspace()).strip()
+
+
+def _topic_scores(user_id: int) -> list[dict]:
+    chat_rows = ChatHistory.query.filter_by(user_id=user_id).order_by(ChatHistory.timestamp.desc()).limit(30).all()
+    practice_rows = PracticeActivity.query.filter_by(user_id=user_id).order_by(PracticeActivity.updated_at.desc()).limit(20).all()
+    task_rows = DailyTask.query.filter_by(user_id=user_id).order_by(DailyTask.updated_at.desc()).limit(20).all()
+    quiz_rows = WeeklyQuizAttempt.query.filter_by(user_id=user_id).order_by(WeeklyQuizAttempt.created_at.desc()).limit(12).all()
+
+    counter: Counter[str] = Counter()
+    for row in chat_rows:
+        for token in _normalize_token(row.question).split():
+            if len(token) >= 4:
+                counter[token] += 2
+    for row in practice_rows:
+        for token in _normalize_token(row.task_name).split():
+            if len(token) >= 4:
+                counter[token] += 3 if (row.status or "").lower() == "completed" else 1
+    for row in task_rows:
+        for token in _normalize_token(row.title).split():
+            if len(token) >= 4:
+                counter[token] += 2 if (row.status or "").lower() == "completed" else 1
+    for row in quiz_rows:
+        if row.percentage is not None:
+            counter["quiz mastery"] += int(max(0, min(100, row.percentage)) / 10)
+
+    topic_rows = []
+    for idx, (topic, score) in enumerate(counter.most_common(5)):
+        confidence = max(20, min(100, 35 + score * 5))
+        topic_rows.append(
+            {
+                "topic": topic.title(),
+                "confidence": confidence,
+                "trend": "up" if confidence >= 70 else "neutral" if confidence >= 50 else "down",
+            }
+        )
+    return topic_rows
+
+
+def _learning_style_breakdown(profile: UserProfile | None, style_row: LearningStyle | None) -> list[dict]:
+    if style_row:
+        total = max(1, style_row.visual_score + style_row.auditory_score + style_row.kinesthetic_score)
+        return [
+            {"subject": "Visual", "value": round((style_row.visual_score / total) * 100)},
+            {"subject": "Audio", "value": round((style_row.auditory_score / total) * 100)},
+            {"subject": "Kinetic", "value": round((style_row.kinesthetic_score / total) * 100)},
+            {"subject": "Reading", "value": max(0, 100 - round(((style_row.visual_score + style_row.auditory_score + style_row.kinesthetic_score) / total) * 100))},
+        ]
+
+    if profile:
+        total = max(0.01, float(profile.visual_weight + profile.auditory_weight + profile.kinesthetic_weight))
+        return [
+            {"subject": "Visual", "value": round((profile.visual_weight / total) * 100)},
+            {"subject": "Audio", "value": round((profile.auditory_weight / total) * 100)},
+            {"subject": "Kinetic", "value": round((profile.kinesthetic_weight / total) * 100)},
+            {"subject": "Reading", "value": 100 - round(((profile.visual_weight + profile.auditory_weight + profile.kinesthetic_weight) / total) * 100)},
+        ]
+
+    return [
+        {"subject": "Visual", "value": 33},
+        {"subject": "Audio", "value": 33},
+        {"subject": "Kinetic", "value": 34},
+        {"subject": "Reading", "value": 0},
+    ]
+
+
+def _weak_topics(profile: UserProfile | None, topic_rows: list[dict]) -> list[dict]:
+    weak_topics: list[str] = []
+    if profile and isinstance(profile.topic_mastery_json, dict):
+        raw = profile.topic_mastery_json.get("weak_topics", [])
+        if isinstance(raw, list):
+            weak_topics = [str(item) for item in raw if str(item).strip()]
+
+    if weak_topics:
+        rows = []
+        for idx, item in enumerate(weak_topics[:3]):
+            score = max(10, 55 - idx * 8)
+            rows.append(
+                {
+                    "name": item,
+                    "score": score,
+                    "priority": "High" if score < 50 else "Medium",
+                    "color": "#E76F51" if score < 50 else "#F4A261",
+                }
+            )
+        return rows
+
+    rows = []
+    for idx, item in enumerate(topic_rows[-3:]):
+        score = max(20, min(90, item["confidence"] - 20))
+        rows.append(
+            {
+                "name": item["topic"],
+                "score": score,
+                "priority": "High" if score < 50 else "Medium",
+                "color": "#E76F51" if score < 50 else "#F4A261",
+            }
+        )
+    return rows
+
+
+def _performance_over_time(user_id: int) -> list[dict]:
+    today = datetime.utcnow().date()
+    weeks = []
+    for idx in range(3, -1, -1):
+        week_start = today - timedelta(days=today.weekday() + idx * 7)
+        week_end = week_start + timedelta(days=6)
+        task_attempts = DailyTaskAttempt.query.join(DailyTask, DailyTask.task_id == DailyTaskAttempt.task_id).filter(
+            DailyTaskAttempt.user_id == user_id,
+            DailyTask.due_date >= week_start,
+            DailyTask.due_date <= week_end,
+        ).all()
+        quiz_attempts = WeeklyQuizAttempt.query.filter(
+            WeeklyQuizAttempt.user_id == user_id,
+            WeeklyQuizAttempt.created_at >= datetime.combine(week_start, datetime.min.time()),
+            WeeklyQuizAttempt.created_at < datetime.combine(week_end + timedelta(days=1), datetime.min.time()),
+        ).all()
+        completed = sum(1 for attempt in task_attempts if (attempt.status or "").lower() == "completed")
+        quiz_avg = sum((attempt.percentage or 0) for attempt in quiz_attempts) / len(quiz_attempts) if quiz_attempts else 0
+        score = min(100, int(completed * 20 + quiz_avg * 0.6))
+        weeks.append({"week": f"Week {4 - idx}", "score": score})
+    return weeks
+
+
+def _skill_distribution(user_id: int) -> list[dict]:
+    chat_count = ChatHistory.query.filter_by(user_id=user_id).count()
+    practice_count = PracticeActivity.query.filter_by(user_id=user_id).count()
+    download_count = Download.query.filter_by(user_id=user_id).count()
+    quiz_count = WeeklyQuizAttempt.query.filter_by(user_id=user_id).count()
+    code_submissions = CodeLabSubmission.query.filter_by(user_id=user_id).count()
+
+    return [
+        {"name": "Chats", "value": max(1, chat_count)},
+        {"name": "Lab Runs", "value": max(1, code_submissions)},
+        {"name": "Practice", "value": max(1, practice_count)},
+        {"name": "Quizzes", "value": max(1, quiz_count + download_count)},
+    ]
+
+
+def _earned_badges(user_id: int, wallet: RewardWallet, streak: UserStreak, topic_rows: list[dict]) -> list[dict]:
+    chat_count = ChatHistory.query.filter_by(user_id=user_id).count()
+    code_count = CodeLabSubmission.query.filter_by(user_id=user_id).count()
+    practice_count = PracticeActivity.query.filter_by(user_id=user_id, status="completed").count()
+    weekly_best = max(
+        [attempt.percentage for attempt in WeeklyQuizAttempt.query.filter_by(user_id=user_id).all() if attempt.percentage is not None],
+        default=0.0,
+    )
+
+    rules = [
+        ("First Steps", "Complete your first task or send your first chat", chat_count + practice_count > 0, "🎯"),
+        ("Code Master", "Complete 10 lab runs or practice submissions", code_count >= 10 or practice_count >= 10, "💻"),
+        ("Quiz Champion", "Score 90%+ on a weekly quiz", weekly_best >= 90, "🏆"),
+        ("Streak Legend", "Maintain a 7-day streak", streak.current_streak >= 7, "🔥"),
+        ("Momentum Builder", "Earn 500 XP", wallet.current_xp >= 500, "⚡"),
+    ]
+
+    badges = []
+    for name, description, earned, icon in rules:
+        badges.append(
+            {
+                "name": name,
+                "description": description,
+                "earned": bool(earned),
+                "icon": icon,
+            }
+        )
+    # include one adaptive badge based on current strongest topic
+    if topic_rows:
+        badges.append(
+            {
+                "name": f"{topic_rows[0]['topic']} Explorer",
+                "description": f"Show progress in {topic_rows[0]['topic'].lower()} through repeated practice",
+                "earned": topic_rows[0]["confidence"] >= 70,
+                "icon": "🧠",
+            }
+        )
+    return badges
+
+
+def _reward_history(user_id: int) -> list[dict]:
+    rows = RewardRedemption.query.filter_by(user_id=user_id).order_by(RewardRedemption.created_at.desc()).limit(20).all()
+    return [
+        {
+            "redemption_id": row.redemption_id,
+            "reward_key": row.reward_key,
+            "reward_name": row.reward_name,
+            "cost": row.cost,
+            "status": row.status,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in rows
+    ]
+
+
+def _reward_catalog(wallet: RewardWallet) -> list[dict]:
+    return [
+        {
+            **item,
+            "available": wallet.reward_points >= item["cost"],
+        }
+        for item in REWARD_CATALOG
+    ]
+
+
+def _reward_redemptions(user_id: int) -> list[dict]:
+    rows = RewardRedemption.query.filter_by(user_id=user_id).order_by(RewardRedemption.created_at.desc()).all()
+    return [
+        {
+            "redemption_id": row.redemption_id,
+            "reward_key": row.reward_key,
+            "reward_name": row.reward_name,
+            "cost": row.cost,
+            "status": row.status,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in rows
+    ]
+
+
+def _serialize_badges(user_id: int, wallet: RewardWallet, streak: UserStreak, topic_rows: list[dict]) -> list[dict]:
+    chat_count = ChatHistory.query.filter_by(user_id=user_id).count()
+    code_count = CodeLabSubmission.query.filter_by(user_id=user_id).count()
+    practice_count = PracticeActivity.query.filter_by(user_id=user_id, status="completed").count()
+    weekly_best = max(
+        [attempt.percentage for attempt in WeeklyQuizAttempt.query.filter_by(user_id=user_id).all() if attempt.percentage is not None],
+        default=0.0,
+    )
+
+    badge_map = {
+        "activity": chat_count + practice_count > 0,
+        "code": code_count >= 10 or practice_count >= 10,
+        "quiz": weekly_best >= 90,
+        "streak": streak.current_streak >= 7,
+        "xp": wallet.current_xp >= 500,
+    }
+
+    badges = []
+    for item in BADGE_CATALOG:
+        badges.append(
+            {
+                "name": item["name"],
+                "description": item["description"],
+                "icon": item["icon"],
+                "earned": bool(badge_map.get(item["threshold"], False)),
+            }
+        )
+
+    if topic_rows:
+        top_topic = topic_rows[0]["topic"]
+        badges.append(
+            {
+                "name": f"{top_topic} Explorer",
+                "description": f"Show progress in {top_topic.lower()} through repeated practice",
+                "icon": "🧠",
+                "earned": topic_rows[0]["confidence"] >= 70,
+            }
+        )
+
+    return badges
 
 
 def _serialize_task(task: DailyTask) -> dict:
@@ -424,8 +758,10 @@ def submit_weekly_quiz(quiz_id: int):
 @jwt_required()
 def rewards_summary():
     user_id = int(get_jwt_identity())
+    profile = _ensure_profile(user_id)
     wallet = _ensure_wallet(user_id)
     streak = _ensure_streak(user_id)
+    topic_rows = _topic_scores(user_id)
     db.session.commit()
 
     recent_events = (
@@ -447,6 +783,10 @@ def rewards_summary():
                 "longest_streak": streak.longest_streak,
                 "last_active_date": streak.last_active_date.isoformat() if streak.last_active_date else None,
             },
+            "earned_badges": _serialize_badges(user_id, wallet, streak, topic_rows),
+            "reward_vault": _reward_catalog(wallet),
+            "reward_redemptions": _reward_redemptions(user_id),
+            "learning_style": profile.difficulty_level,
             "recent_xp_events": [
                 {
                     "event_id": e.event_id,
@@ -458,6 +798,51 @@ def rewards_summary():
                 }
                 for e in recent_events
             ],
+        }
+    )
+
+
+@progression_bp.post("/rewards/redeem")
+@jwt_required()
+def redeem_reward():
+    user_id = int(get_jwt_identity())
+    payload = request.get_json() or {}
+    reward_key = str(payload.get("reward_key", "")).strip()
+    if not reward_key:
+        return jsonify({"error": "reward_key is required"}), 400
+
+    reward_item = next((item for item in REWARD_CATALOG if item["reward_key"] == reward_key), None)
+    if not reward_item:
+        return jsonify({"error": "reward not found"}), 404
+
+    wallet = _ensure_wallet(user_id)
+    if wallet.reward_points < reward_item["cost"]:
+        return jsonify({"error": "not enough reward points"}), 400
+
+    wallet.reward_points -= reward_item["cost"]
+    redemption = RewardRedemption(
+        user_id=user_id,
+        reward_key=reward_item["reward_key"],
+        reward_name=reward_item["name"],
+        cost=reward_item["cost"],
+        status="redeemed",
+    )
+    db.session.add(redemption)
+    db.session.commit()
+
+    return jsonify(
+        {
+            "message": "reward redeemed",
+            "wallet": {
+                "current_xp": wallet.current_xp,
+                "level": wallet.level,
+                "reward_points": wallet.reward_points,
+            },
+            "reward": {
+                "reward_key": reward_item["reward_key"],
+                "reward_name": reward_item["name"],
+                "cost": reward_item["cost"],
+            },
         }
     )
 

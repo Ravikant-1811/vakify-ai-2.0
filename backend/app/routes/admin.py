@@ -5,8 +5,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import User, LearningStyle, ChatHistory, PracticeActivity, Download, ChatFeedback
-from app.services.admin_auth import is_admin_email
+from app.models import User, LearningStyle, ChatHistory, PracticeActivity, Download, ChatFeedback, RewardWallet, XPEvent, UserRoleOverride
+from app.services.admin_auth import get_role_for_email, is_admin_email
 from app.services.user_cleanup import delete_user_with_related_data
 
 
@@ -18,7 +18,7 @@ def _require_admin():
     user = User.query.get(user_id)
     if not user:
         return None, (jsonify({"error": "user not found"}), 404)
-    if not is_admin_email(user.email):
+    if get_role_for_email(user.email) != "admin":
         return None, (jsonify({"error": "admin access required"}), 403)
     return user, None
 
@@ -100,6 +100,7 @@ def users():
                 "user_id": u.user_id,
                 "name": u.name,
                 "email": u.email,
+                "role": get_role_for_email(u.email),
                 "is_admin": is_admin_email(u.email),
                 "learning_style": style.learning_style if style else None,
                 "created_at": u.created_at.isoformat(),
@@ -111,6 +112,92 @@ def users():
             }
         )
     return jsonify(result)
+
+
+@admin_bp.put("/users/<int:user_id>/role")
+@jwt_required()
+def update_role(user_id: int):
+    admin_user, err = _require_admin()
+    if err:
+        return err
+    if admin_user.user_id == user_id:
+        return jsonify({"error": "cannot change your own admin role"}), 400
+
+    target = User.query.get(user_id)
+    if not target:
+        return jsonify({"error": "user not found"}), 404
+
+    payload = request.get_json() or {}
+    role = str(payload.get("role", "")).strip().lower()
+    if role not in {"learner", "moderator", "admin"}:
+        return jsonify({"error": "role must be learner, moderator, or admin"}), 400
+
+    reason = str(payload.get("reason", "")).strip() or None
+    override = db.session.get(UserRoleOverride, user_id)
+    if not override:
+        override = UserRoleOverride(user_id=user_id, role=role, reason=reason, updated_by=admin_user.user_id)
+        db.session.add(override)
+    else:
+        override.role = role
+        override.reason = reason
+        override.updated_by = admin_user.user_id
+    db.session.commit()
+
+    return jsonify(
+        {
+            "message": "role updated",
+            "user_id": user_id,
+            "role": role,
+            "reason": reason,
+        }
+    )
+
+
+@admin_bp.post("/users/<int:user_id>/grant-points")
+@jwt_required()
+def grant_points(user_id: int):
+    admin_user, err = _require_admin()
+    if err:
+        return err
+
+    target = User.query.get(user_id)
+    if not target:
+        return jsonify({"error": "user not found"}), 404
+
+    payload = request.get_json() or {}
+    points = int(payload.get("points", 0))
+    if points <= 0:
+        return jsonify({"error": "points must be greater than zero"}), 400
+
+    reason = str(payload.get("reason", "")).strip() or "admin grant"
+    wallet = db.session.get(RewardWallet, user_id)
+    if not wallet:
+        wallet = RewardWallet(user_id=user_id, current_xp=0, level=1, reward_points=0)
+        db.session.add(wallet)
+        db.session.flush()
+
+    wallet.current_xp += points
+    wallet.reward_points += points
+    wallet.level = max(1, (wallet.current_xp // 200) + 1)
+    db.session.add(
+        XPEvent(
+            user_id=user_id,
+            source="admin_grant",
+            source_id=admin_user.user_id,
+            points=points,
+            meta={"reason": reason, "granted_by": admin_user.email},
+        )
+    )
+    db.session.commit()
+
+    return jsonify(
+        {
+            "message": "points granted",
+            "user_id": user_id,
+            "points": points,
+            "reason": reason,
+        }
+    )
 
 
 @admin_bp.delete("/users/<int:user_id>")

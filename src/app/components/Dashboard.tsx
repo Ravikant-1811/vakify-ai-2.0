@@ -25,6 +25,11 @@ type DashboardSummary = {
   daily_chat: TimelineRow[];
   daily_practice: TimelineRow[];
   daily_downloads: TimelineRow[];
+  topic_confidence: Array<{ topic: string; confidence: number; trend: string }>;
+  learning_style_breakdown: Array<{ subject: string; value: number }>;
+  weak_topics: Array<{ name: string; score: number; priority: string; color: string }>;
+  performance_over_time: Array<{ week: string; score: number }>;
+  skill_distribution: Array<{ name: string; value: number }>;
 };
 
 type RewardSummary = {
@@ -121,19 +126,9 @@ export function Dashboard() {
   }, []);
 
   const xpData = (() => {
-    const fallback = [
-      { day: 'Mon', xp: 120 },
-      { day: 'Tue', xp: 180 },
-      { day: 'Wed', xp: 150 },
-      { day: 'Thu', xp: 220 },
-      { day: 'Fri', xp: 190 },
-      { day: 'Sat', xp: 250 },
-      { day: 'Sun', xp: 140 },
-    ];
     if (!summary) {
-      return fallback;
+      return [];
     }
-
     const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const totals = new Map<string, number>();
     [...summary.daily_chat, ...summary.daily_practice, ...summary.daily_downloads].forEach((row) => {
@@ -148,41 +143,40 @@ export function Dashboard() {
     }));
   })();
 
-  const languageProgress = [
-    { lang: 'Python', progress: 75 },
-    { lang: 'JavaScript', progress: 60 },
-    { lang: 'Java', progress: 45 },
-    { lang: 'C++', progress: 30 },
-  ];
+  const languageProgress = summary?.learning_style_breakdown || [];
 
-  const leaderboardRows = leaderboard.length
-    ? leaderboard
-    : [
-        { rank: 1, name: 'Alex Chen', score: 2450 },
-        { rank: 2, name: 'Sarah Kim', score: 2180 },
-        { rank: 3, name: user?.displayName || 'You', score: user?.xp || 0 },
-        { rank: 4, name: 'Mike Ross', score: 1120 },
-        { rank: 5, name: 'Emma Wilson', score: 980 },
-      ];
+  const leaderboardRows = leaderboard;
 
   const completedTasks = tasks.filter((task) => task.status === 'completed').length;
-  const dailyTask = {
-    title: tasks[0]?.title || 'Master Array Manipulation',
-    description: tasks[0]?.description || 'Complete 3 practice problems on array methods',
-    progress: completedTasks,
-    total: Math.max(tasks.length, 3),
-    xp: tasks[0]?.points_reward || 50
-  };
+  const dailyTask = tasks[0]
+    ? {
+        title: tasks[0].title,
+        description: tasks[0].description,
+        progress: completedTasks,
+        total: Math.max(tasks.length, 1),
+        xp: tasks[0].points_reward,
+      }
+    : null;
 
-  const weeklyQuiz = {
-    title: quiz?.title || 'Weekly Challenge: Data Structures',
-    questions: quiz?.questions?.length || 10,
-    timeLimit: '30 min',
-    xp: quizBestScore >= 80 ? 200 : 150,
-    available: Boolean(quiz),
-    attempts: quizAttempts,
-    bestScore: quizBestScore
-  };
+  const weeklyQuiz = quiz
+    ? {
+        title: quiz.title,
+        questions: quiz.questions?.length || 0,
+        timeLimit: '30 min',
+        xp: quizBestScore >= 80 ? 200 : 150,
+        available: true,
+        attempts: quizAttempts,
+        bestScore: quizBestScore,
+      }
+    : {
+        title: 'No weekly quiz available yet',
+        questions: 0,
+        timeLimit: '30 min',
+        xp: 0,
+        available: false,
+        attempts: 0,
+        bestScore: 0,
+      };
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
@@ -266,31 +260,43 @@ export function Dashboard() {
               <TrendingUp className="w-5 h-5 text-secondary" />
               XP Progress This Week
             </h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={xpData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="day" stroke="#64748b" />
-                <YAxis stroke="#64748b" />
-                <Tooltip />
-                <Line type="monotone" dataKey="xp" stroke="#1B998B" strokeWidth={3} />
-              </LineChart>
-            </ResponsiveContainer>
+            {xpData.length ? (
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={xpData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="day" stroke="#64748b" />
+                  <YAxis stroke="#64748b" />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="xp" stroke="#1B998B" strokeWidth={3} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+                Complete tasks and quizzes to populate your weekly XP chart.
+              </div>
+            )}
           </div>
 
           <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
             <h3 className="text-lg mb-4 flex items-center gap-2">
               <Code className="w-5 h-5 text-primary" />
-              Language Progress
+              Learning Style Mix
             </h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={languageProgress}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="lang" stroke="#64748b" />
-                <YAxis stroke="#64748b" />
-                <Tooltip />
-                <Bar dataKey="progress" fill="#1E3A5F" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {languageProgress.length ? (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={languageProgress}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="subject" stroke="#64748b" />
+                  <YAxis stroke="#64748b" />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#1E3A5F" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+                Complete your onboarding style survey to see your live learning mix.
+              </div>
+            )}
           </div>
 
           <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
@@ -299,36 +305,46 @@ export function Dashboard() {
                 <BookOpen className="w-5 h-5 text-accent" />
                 Daily Task
               </h3>
-              <span className="text-sm text-muted-foreground">
-                +{dailyTask.xp} XP
-              </span>
-            </div>
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-base">{dailyTask.title}</h4>
+              {dailyTask && (
                 <span className="text-sm text-muted-foreground">
-                  {dailyTask.progress}/{dailyTask.total}
+                  +{dailyTask.xp} XP
                 </span>
-              </div>
-              <p className="text-sm text-muted-foreground mb-3">
-                {dailyTask.description}
-              </p>
-              <div className="bg-muted rounded-full h-2">
-                <div
-                  className="bg-secondary h-full rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (dailyTask.progress / dailyTask.total) * 100)}%` }}
-                />
-              </div>
+              )}
             </div>
-            <Link
-              to="/tasks"
-              className="inline-flex items-center gap-2 text-secondary hover:underline"
-            >
-              Continue Task
-              <ChevronRight className="w-4 h-4" />
-            </Link>
+              {dailyTask ? (
+                <>
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-base">{dailyTask.title}</h4>
+                      <span className="text-sm text-muted-foreground">
+                        {dailyTask.progress}/{dailyTask.total}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      {dailyTask.description}
+                    </p>
+                    <div className="bg-muted rounded-full h-2">
+                      <div
+                        className="bg-secondary h-full rounded-full transition-all"
+                        style={{ width: `${Math.min(100, (dailyTask.progress / dailyTask.total) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <Link
+                    to="/tasks"
+                    className="inline-flex items-center gap-2 text-secondary hover:underline"
+                  >
+                    Continue Task
+                    <ChevronRight className="w-4 h-4" />
+                  </Link>
+                </>
+              ) : (
+                <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                  No daily task available yet. Open Tasks & Quizzes to generate today&apos;s work.
+                </div>
+              )}
+            </div>
           </div>
-        </div>
 
         <div className="space-y-6">
           <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
@@ -358,12 +374,18 @@ export function Dashboard() {
                 <span className="text-accent">+{weeklyQuiz.xp} XP</span>
               </div>
             </div>
-            <Link
-              to="/tasks"
-              className="w-full block text-center bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity"
-            >
-              Start Quiz
-            </Link>
+            {weeklyQuiz.available ? (
+              <Link
+                to="/tasks"
+                className="w-full block text-center bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity"
+              >
+                Start Quiz
+              </Link>
+            ) : (
+              <div className="w-full block text-center bg-muted text-muted-foreground py-3 rounded-lg">
+                Quiz not ready yet
+              </div>
+            )}
           </div>
 
           <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
@@ -371,31 +393,37 @@ export function Dashboard() {
               <Trophy className="w-5 h-5 text-accent" />
               Leaderboard
             </h3>
-            <div className="space-y-2">
-              {leaderboardRows.slice(0, 5).map((entry) => (
-                <div
-                  key={entry.rank}
-                  className={`flex items-center justify-between p-3 rounded-lg ${
-                    entry.rank === myRank
-                      ? 'bg-secondary/10 border border-secondary'
-                      : 'bg-muted/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm">
-                      {entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
+            {leaderboardRows.length ? (
+              <div className="space-y-2">
+                {leaderboardRows.slice(0, 5).map((entry) => (
+                  <div
+                    key={entry.rank}
+                    className={`flex items-center justify-between p-3 rounded-lg ${
+                      entry.rank === myRank
+                        ? 'bg-secondary/10 border border-secondary'
+                        : 'bg-muted/50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm">
+                        {entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
+                      </div>
+                      <div>
+                        <div className="text-sm">{entry.name}</div>
+                        <div className="text-xs text-muted-foreground">{entry.score} XP</div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-sm">{entry.name}</div>
-                      <div className="text-xs text-muted-foreground">{entry.score} XP</div>
-                    </div>
+                    {entry.rank === myRank && (
+                      <Zap className="w-4 h-4 text-secondary" />
+                    )}
                   </div>
-                  {entry.rank === myRank && (
-                    <Zap className="w-4 h-4 text-secondary" />
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                No leaderboard activity yet. Start earning XP to appear here.
+              </div>
+            )}
             <Link
               to="/rewards"
               className="mt-4 inline-flex items-center gap-2 text-secondary hover:underline"

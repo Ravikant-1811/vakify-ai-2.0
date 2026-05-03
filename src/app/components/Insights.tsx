@@ -18,7 +18,22 @@ type StudyPlan = {
   source?: string;
 };
 
+type DashboardInsights = {
+  mastery_score: number;
+  streak_days: number;
+  recommended_topic: string;
+  daily_chat: Array<{ date: string; count: number }>;
+  daily_practice: Array<{ date: string; count: number }>;
+  daily_downloads: Array<{ date: string; count: number }>;
+  topic_confidence: Array<{ topic: string; confidence: number; trend: string }>;
+  learning_style_breakdown: Array<{ subject: string; value: number }>;
+  weak_topics: Array<{ name: string; score: number; priority: string; color: string }>;
+  performance_over_time: Array<{ week: string; score: number }>;
+  skill_distribution: Array<{ name: string; value: number }>;
+};
+
 export function Insights() {
+  const [summary, setSummary] = useState<DashboardInsights | null>(null);
   const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null);
 
   useEffect(() => {
@@ -26,12 +41,22 @@ export function Insights() {
 
     const loadPlan = async () => {
       try {
-        const plan = await apiFetch<StudyPlan>('/api/ai/study-plan');
-        if (!cancelled) {
-          setStudyPlan(plan);
+        const [summaryRes, planRes] = await Promise.allSettled([
+          apiFetch<DashboardInsights>('/api/dashboard/insights'),
+          apiFetch<StudyPlan>('/api/ai/study-plan'),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        if (summaryRes.status === 'fulfilled') {
+          setSummary(summaryRes.value);
+        }
+        if (planRes.status === 'fulfilled') {
+          setStudyPlan(planRes.value);
         }
       } catch {
         if (!cancelled) {
+          setSummary(null);
           setStudyPlan(null);
         }
       }
@@ -43,40 +68,11 @@ export function Insights() {
     };
   }, []);
 
-  const topicConfidence = [
-    { topic: 'Arrays', confidence: 85, trend: 'up' },
-    { topic: 'Sorting', confidence: 75, trend: 'up' },
-    { topic: 'Hash Tables', confidence: 60, trend: 'neutral' },
-    { topic: 'Recursion', confidence: 45, trend: 'down' },
-    { topic: 'Graphs', confidence: 30, trend: 'down' },
-  ];
-
-  const learningStyleData = [
-    { subject: 'Visual', value: 75 },
-    { subject: 'Audio', value: 50 },
-    { subject: 'Kinetic', value: 85 },
-    { subject: 'Reading', value: 60 },
-  ];
-
-  const weakTopics = [
-    { name: 'Recursion', score: 45, priority: 'High', color: '#E76F51' },
-    { name: 'Graph Algorithms', score: 30, priority: 'High', color: '#E76F51' },
-    { name: 'Dynamic Programming', score: 55, priority: 'Medium', color: '#F4A261' },
-  ];
-
-  const performanceOverTime = [
-    { week: 'Week 1', score: 65 },
-    { week: 'Week 2', score: 70 },
-    { week: 'Week 3', score: 75 },
-    { week: 'Week 4', score: 85 },
-  ];
-
-  const skillDistribution = [
-    { name: 'Data Structures', value: 400 },
-    { name: 'Algorithms', value: 300 },
-    { name: 'Problem Solving', value: 200 },
-    { name: 'Code Quality', value: 100 },
-  ];
+  const topicConfidence = summary?.topic_confidence ?? [];
+  const learningStyleData = summary?.learning_style_breakdown ?? [];
+  const weakTopics = summary?.weak_topics ?? [];
+  const performanceOverTime = summary?.performance_over_time ?? [];
+  const skillDistribution = summary?.skill_distribution ?? [];
 
   const COLORS = ['#1B998B', '#F4A261', '#E76F51', '#1E3A5F'];
 
@@ -101,26 +97,28 @@ export function Insights() {
           icon: CheckCircle2,
         },
       ]
-    : [
-        {
-          title: 'Practice Recursion Daily',
-          description: 'Your recursion confidence is low. Complete 2 recursion problems daily for the next week.',
-          impact: 'High',
-          icon: Target
-        },
-        {
-          title: 'Visual Learning Boost',
-          description: 'You learn best visually. Try using diagram mode more often in AI chat.',
-          impact: 'Medium',
-          icon: Brain
-        },
-        {
-          title: 'Maintain Your Streak',
-          description: 'You have a 7-day streak! Keep completing daily tasks to maintain momentum.',
-          impact: 'Medium',
-          icon: CheckCircle2
-        },
-      ];
+    : weakTopics.length
+      ? [
+          {
+            title: `${weakTopics[0].name} Focus`,
+            description: `Your current ${weakTopics[0].name.toLowerCase()} score is ${weakTopics[0].score}%. Build it with daily practice.`,
+            impact: weakTopics[0].priority,
+            icon: Target,
+          },
+          {
+            title: 'Learning Style Match',
+            description: 'Use the live style analysis to balance visual, audio, and hands-on learning.',
+            impact: 'Medium',
+            icon: Brain,
+          },
+          {
+            title: 'Streak Growth',
+            description: summary?.streak_days ? `You have a ${summary.streak_days}-day streak. Keep it going.` : 'Start a streak by completing one task each day.',
+            impact: 'Medium',
+            icon: CheckCircle2,
+          },
+        ]
+      : [];
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
@@ -174,7 +172,7 @@ export function Insights() {
           </h3>
 
           <div className="space-y-4">
-            {topicConfidence.map((topic) => (
+            {topicConfidence.length ? topicConfidence.map((topic) => (
               <div key={topic.topic}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -195,7 +193,11 @@ export function Insights() {
                   />
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                Start chatting or solving tasks to build topic confidence.
+              </div>
+            )}
           </div>
         </div>
 
@@ -205,18 +207,25 @@ export function Insights() {
             Learning Style Analysis
           </h3>
 
-          <ResponsiveContainer width="100%" height={300}>
-            <RadarChart data={learningStyleData}>
-              <PolarGrid stroke="#e2e8f0" />
-              <PolarAngleAxis dataKey="subject" stroke="#64748b" />
-              <PolarRadiusAxis stroke="#64748b" />
-              <Radar name="Preference" dataKey="value" stroke="#1B998B" fill="#1B998B" fillOpacity={0.3} />
-            </RadarChart>
-          </ResponsiveContainer>
-
-          <p className="text-sm text-muted-foreground mt-4">
-            You learn best through kinetic (hands-on) and visual methods. Adjust your learning mode preferences to maximize effectiveness.
-          </p>
+          {learningStyleData.length ? (
+            <>
+              <ResponsiveContainer width="100%" height={300}>
+                <RadarChart data={learningStyleData}>
+                  <PolarGrid stroke="#e2e8f0" />
+                  <PolarAngleAxis dataKey="subject" stroke="#64748b" />
+                  <PolarRadiusAxis stroke="#64748b" />
+                  <Radar name="Preference" dataKey="value" stroke="#1B998B" fill="#1B998B" fillOpacity={0.3} />
+                </RadarChart>
+              </ResponsiveContainer>
+              <p className="text-sm text-muted-foreground mt-4">
+                This chart is driven by your saved learning style profile.
+              </p>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+              Set up your learning style in onboarding to see the live radar chart.
+            </div>
+          )}
         </div>
       </div>
 
@@ -227,20 +236,27 @@ export function Insights() {
             Performance Over Time
           </h3>
 
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={performanceOverTime}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="week" stroke="#64748b" />
-              <YAxis stroke="#64748b" />
-              <Tooltip />
-              <Bar dataKey="score" fill="#1B998B" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-
-          <div className="mt-4 flex items-center gap-2 text-sm text-secondary">
-            <TrendingUp className="w-4 h-4" />
-            <span>+20% improvement this month!</span>
-          </div>
+          {performanceOverTime.length ? (
+            <>
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={performanceOverTime}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="week" stroke="#64748b" />
+                  <YAxis stroke="#64748b" />
+                  <Tooltip />
+                  <Bar dataKey="score" fill="#1B998B" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="mt-4 flex items-center gap-2 text-sm text-secondary">
+                <TrendingUp className="w-4 h-4" />
+                <span>Live performance based on tasks and quizzes.</span>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+              Complete a few tasks and quizzes to build performance history.
+            </div>
+          )}
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
@@ -249,25 +265,31 @@ export function Insights() {
             Skill Distribution
           </h3>
 
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={skillDistribution}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {skillDistribution.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          {skillDistribution.length ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={skillDistribution}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {skillDistribution.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+              Your activity breakdown will appear here after a few sessions.
+            </div>
+          )}
         </div>
       </div>
 
@@ -279,7 +301,7 @@ export function Insights() {
           </h3>
 
           <div className="space-y-4">
-            {weakTopics.map((topic) => (
+            {weakTopics.length ? weakTopics.map((topic) => (
               <div
                 key={topic.name}
                 className="p-4 rounded-lg border border-border bg-muted/30"
@@ -309,7 +331,11 @@ export function Insights() {
                   <span className="text-sm text-muted-foreground">{topic.score}%</span>
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                Weak topic signals will appear here once you have enough learning activity.
+              </div>
+            )}
           </div>
         </div>
 

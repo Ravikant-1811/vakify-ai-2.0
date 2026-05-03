@@ -20,6 +20,7 @@ type AdminUser = {
   user_id: number;
   name: string;
   email: string;
+  role: 'learner' | 'moderator' | 'admin';
   is_admin: boolean;
   learning_style: string | null;
   created_at: string;
@@ -41,6 +42,11 @@ export function AdminConsole() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [query, setQuery] = useState('');
+  const [roleDrafts, setRoleDrafts] = useState<Record<number, string>>({});
+  const [grantUserId, setGrantUserId] = useState<number | ''>('');
+  const [grantPoints, setGrantPoints] = useState(50);
+  const [grantReason, setGrantReason] = useState('Great progress');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +64,9 @@ export function AdminConsole() {
         setSummary(summaryRes);
         setUsers(usersRes);
         setAnalytics(analyticsRes);
+        setRoleDrafts(
+          Object.fromEntries(usersRes.map((item) => [item.user_id, item.role])),
+        );
       } catch {
         if (!cancelled) {
           setSummary(null);
@@ -81,7 +90,7 @@ export function AdminConsole() {
   const platformStats = [
     { label: 'Total Users', value: String(summary?.metrics.users ?? 0), change: `+${summary?.latest_users.length ?? 0}`, icon: Users, color: 'text-secondary' },
     { label: 'Active Today', value: String(summary?.metrics.chat_messages ?? 0), change: '+backend', icon: Activity, color: 'text-accent' },
-    { label: 'Moderators', value: String(users.filter((item) => !item.is_admin).length), change: `Admin: ${user?.role === 'admin' ? 'yes' : 'no'}`, icon: Shield, color: 'text-primary' },
+    { label: 'Admins & Moderators', value: String(users.filter((item) => item.role === 'admin' || item.role === 'moderator').length), change: `Admin: ${user?.role === 'admin' ? 'yes' : 'no'}`, icon: Shield, color: 'text-primary' },
     { label: 'Flagged Content', value: String(analytics?.feedback_summary.total ?? 0), change: `${analytics?.feedback_summary.needs_work ?? 0} needs work`, icon: AlertTriangle, color: 'text-destructive' },
   ];
 
@@ -90,16 +99,46 @@ export function AdminConsole() {
     users: row.count,
   }));
 
-  const recentBadges = [
-    { name: 'Code Master', recipients: summary?.metrics.practice_submissions ?? 0, created: 'Live data' },
-    { name: 'Quiz Champion', recipients: summary?.metrics.chat_messages ?? 0, created: 'Live data' },
-    { name: 'Streak Legend', recipients: summary?.metrics.downloads ?? 0, created: 'Live data' },
+  const rewardMetrics = [
+    { name: 'Practice submissions', value: summary?.metrics.practice_submissions ?? 0, meta: 'Live data' },
+    { name: 'Chat messages', value: summary?.metrics.chat_messages ?? 0, meta: 'Live data' },
+    { name: 'Downloads', value: summary?.metrics.downloads ?? 0, meta: 'Live data' },
   ];
 
   const handleDelete = async (userId: number) => {
     await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
     const refreshed = await apiFetch<AdminUser[]>('/api/admin/users');
     setUsers(refreshed);
+    setRoleDrafts(Object.fromEntries(refreshed.map((item) => [item.user_id, item.role])));
+  };
+
+  const handleRoleSave = async (userId: number) => {
+    setStatusMessage(null);
+    const role = roleDrafts[userId] || 'learner';
+    await apiFetch(`/api/admin/users/${userId}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    });
+    const refreshed = await apiFetch<AdminUser[]>('/api/admin/users');
+    setUsers(refreshed);
+    setRoleDrafts(Object.fromEntries(refreshed.map((item) => [item.user_id, item.role])));
+    setStatusMessage('Role updated.');
+  };
+
+  const handleGrantPoints = async () => {
+    if (!grantUserId) {
+      setStatusMessage('Choose a user first.');
+      return;
+    }
+    setStatusMessage(null);
+    await apiFetch(`/api/admin/users/${grantUserId}/grant-points`, {
+      method: 'POST',
+      body: JSON.stringify({
+        points: grantPoints,
+        reason: grantReason,
+      }),
+    });
+    setStatusMessage(`Granted ${grantPoints} XP points.`);
   };
 
   return (
@@ -186,7 +225,7 @@ export function AdminConsole() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full">
+              <table className="w-full">
               <thead className="bg-muted/30">
                 <tr>
                   <th className="px-6 py-4 text-left text-sm">User</th>
@@ -207,10 +246,27 @@ export function AdminConsole() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className={`inline-flex px-3 py-1 rounded-full text-xs ${
-                        userRow.is_admin ? 'bg-destructive/10 text-destructive' : userRow.learning_style === 'kinesthetic' ? 'bg-accent/10 text-accent' : 'bg-secondary/10 text-secondary'
-                      }`}>
-                        {userRow.is_admin ? 'admin' : 'learner'}
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={roleDrafts[userRow.user_id] || userRow.role}
+                          onChange={(e) =>
+                            setRoleDrafts((current) => ({
+                              ...current,
+                              [userRow.user_id]: e.target.value,
+                            }))
+                          }
+                          className="rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                        >
+                          <option value="learner">learner</option>
+                          <option value="moderator">moderator</option>
+                          <option value="admin">admin</option>
+                        </select>
+                        <button
+                          onClick={() => void handleRoleSave(userRow.user_id)}
+                          className="rounded-lg bg-secondary px-3 py-2 text-sm text-secondary-foreground hover:opacity-90"
+                        >
+                          Save
+                        </button>
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm">{userRow.stats.practice}</td>
@@ -237,16 +293,34 @@ export function AdminConsole() {
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
           <h3 className="text-lg mb-6">Role Management</h3>
           <div className="space-y-4">
-            {['Learner', 'Moderator', 'Admin'].map((role) => (
-              <div key={role} className="border border-border rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-base">{role}</h4>
+            {filteredUsers.slice(0, 6).map((item) => (
+              <div key={item.user_id} className="border border-border rounded-lg p-4 flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-base mb-1">{item.name}</h4>
+                  <p className="text-sm text-muted-foreground">{item.email}</p>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  {role === 'Learner' && 'Access to learning features, tasks, and rewards'}
-                  {role === 'Moderator' && 'Can review content and moderate reported responses'}
-                  {role === 'Admin' && 'Full platform control and user management'}
-                </p>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={roleDrafts[item.user_id] || item.role}
+                    onChange={(e) =>
+                      setRoleDrafts((current) => ({
+                        ...current,
+                        [item.user_id]: e.target.value,
+                      }))
+                    }
+                    className="rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                  >
+                    <option value="learner">learner</option>
+                    <option value="moderator">moderator</option>
+                    <option value="admin">admin</option>
+                  </select>
+                  <button
+                    onClick={() => void handleRoleSave(item.user_id)}
+                    className="rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground hover:opacity-90"
+                  >
+                    Save Role
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -259,18 +333,64 @@ export function AdminConsole() {
             <h3 className="text-lg">Badges & Rewards Management</h3>
           </div>
 
-          <div className="space-y-3">
-            {recentBadges.map((badge) => (
-              <div key={badge.name} className="flex items-center justify-between p-4 border border-border rounded-lg">
-                <div>
-                  <h4 className="text-sm mb-1">{badge.name}</h4>
-                  <p className="text-xs text-muted-foreground">Created: {badge.created}</p>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-sm text-muted-foreground">{badge.recipients} recipients</div>
-                </div>
+          {statusMessage && (
+            <div className="mb-4 rounded-lg border border-secondary/20 bg-secondary/5 px-4 py-3 text-sm text-secondary">
+              {statusMessage}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <div className="border border-border rounded-lg p-4 space-y-4">
+              <h4 className="text-base">Grant XP / Reward Points</h4>
+              <select
+                value={grantUserId}
+                onChange={(e) => setGrantUserId(e.target.value ? Number(e.target.value) : '')}
+                className="w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+              >
+                <option value="">Select user</option>
+                {filteredUsers.map((item) => (
+                  <option key={item.user_id} value={item.user_id}>
+                    {item.name} ({item.email})
+                  </option>
+                ))}
+              </select>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  value={grantPoints}
+                  onChange={(e) => setGrantPoints(Number(e.target.value))}
+                  className="rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                  placeholder="Points"
+                />
+                <input
+                  type="text"
+                  value={grantReason}
+                  onChange={(e) => setGrantReason(e.target.value)}
+                  className="rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
+                  placeholder="Reason"
+                />
               </div>
-            ))}
+              <button
+                onClick={() => void handleGrantPoints()}
+                className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90"
+              >
+                Grant Points
+              </button>
+            </div>
+
+            <div className="border border-border rounded-lg p-4 space-y-3">
+              <h4 className="text-base">Recent Reward Metrics</h4>
+              {rewardMetrics.map((badge) => (
+                <div key={badge.name} className="flex items-center justify-between rounded-lg bg-muted/30 px-4 py-3">
+                  <div>
+                    <h5 className="text-sm mb-1">{badge.name}</h5>
+                    <p className="text-xs text-muted-foreground">{badge.meta}</p>
+                  </div>
+                  <div className="text-sm text-muted-foreground">{badge.value}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

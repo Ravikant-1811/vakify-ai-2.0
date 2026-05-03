@@ -9,7 +9,7 @@ def _client(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET_KEY", "test-jwt-secret")
     monkeypatch.setenv("SECRET_KEY", "test-secret")
     monkeypatch.setenv("MODERATOR_EMAILS", "moderator@example.com")
-    monkeypatch.setenv("ADMIN_EMAILS", "")
+    monkeypatch.setenv("ADMIN_EMAILS", "admin@example.com")
     app = create_app()
     app.config.update(TESTING=True)
     return app.test_client()
@@ -138,7 +138,22 @@ def test_language_aware_daily_and_weekly_progression(tmp_path, monkeypatch):
     )
     assert rewards.status_code == 200
     rewards_data = rewards.get_json()
+    assert rewards_data["earned_badges"]
+    assert rewards_data["reward_vault"]
+    assert rewards_data["reward_redemptions"] == []
     assert rewards_data["wallet"]["reward_points"] >= quiz_result["xp_awarded"] + code_result["xp_awarded"] + weekly_result["xp_awarded"]
+
+    insights = client.get(
+        "/api/dashboard/insights",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert insights.status_code == 200
+    insights_data = insights.get_json()
+    assert insights_data["topic_confidence"]
+    assert insights_data["learning_style_breakdown"]
+    assert insights_data["weak_topics"]
+    assert insights_data["performance_over_time"]
+    assert insights_data["skill_distribution"]
 
 
 def test_progression_backfills_stale_saved_rows(tmp_path, monkeypatch):
@@ -243,3 +258,56 @@ def test_training_workspace_persists_draft_and_run_state(tmp_path, monkeypatch):
     assert persisted_data["code"] == "print('hello from db')"
     assert persisted_data["stdin"] == "12\n"
     assert persisted_data["last_output"] != ""
+
+
+def test_admin_role_override_and_reward_redemption(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    admin_token = _register(client, "admin@example.com", "Admin User")
+    learner_token = _register(client, "role@example.com", "Role Learner")
+
+    role_update = client.put(
+        "/api/admin/users/2/role",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"role": "moderator", "reason": "needs moderation access"},
+    )
+    assert role_update.status_code == 200
+
+    learner_me = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {learner_token}"},
+    )
+    assert learner_me.status_code == 200
+    assert learner_me.get_json()["role"] == "moderator"
+
+    grant = client.post(
+        "/api/admin/users/2/grant-points",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"points": 600, "reason": "reward points for testing"},
+    )
+    assert grant.status_code == 200
+
+    rewards_before = client.get(
+        "/api/rewards/summary",
+        headers={"Authorization": f"Bearer {learner_token}"},
+    )
+    assert rewards_before.status_code == 200
+    before_data = rewards_before.get_json()
+    redeemable = next(item for item in before_data["reward_vault"] if item["available"])
+    redeem = client.post(
+        "/api/rewards/redeem",
+        headers={"Authorization": f"Bearer {learner_token}"},
+        json={"reward_key": redeemable["reward_key"]},
+    )
+    assert redeem.status_code == 200
+    redeem_data = redeem.get_json()
+    assert redeem_data["reward"]["reward_key"] == redeemable["reward_key"]
+
+    rewards_after = client.get(
+        "/api/rewards/summary",
+        headers={"Authorization": f"Bearer {learner_token}"},
+    )
+    assert rewards_after.status_code == 200
+    after_data = rewards_after.get_json()
+    assert after_data["reward_redemptions"]
+    assert after_data["wallet"]["reward_points"] < before_data["wallet"]["reward_points"]
