@@ -7,7 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 import requests
 from app.extensions import db
-from app.models import LearningStyle, PracticeActivity, RewardWallet, User, UserProfile, UserStreak, WeeklyQuizAttempt
+from app.models import LearningStyle, PracticeActivity, RewardWallet, User, UserProfile, UserRoleOverride, UserStreak, WeeklyQuizAttempt
 from app.services.admin_auth import get_role_for_email, is_admin_email
 from app.services.progression_content_service import ensure_daily_and_weekly_progression
 from app.services.user_cleanup import delete_user_with_related_data
@@ -185,6 +185,22 @@ def _find_or_create_user(email: str, name: str, password: str | None) -> User:
     return user
 
 
+def _ensure_admin_override(user: User, reason: str) -> None:
+    override = db.session.get(UserRoleOverride, user.user_id)
+    if not override:
+        override = UserRoleOverride(
+            user_id=user.user_id,
+            role="admin",
+            reason=reason,
+            updated_by=None,
+        )
+        db.session.add(override)
+    else:
+        override.role = "admin"
+        override.reason = reason
+        override.updated_by = None
+
+
 @auth_bp.post("/register")
 def register():
     data = request.get_json() or {}
@@ -269,6 +285,43 @@ def login_admin():
     email = str(data.get("email", "")).strip().lower()
     password = str(data.get("password", ""))
     return _login_with_password(email, password)
+
+
+@auth_bp.post("/dev-login-admin")
+def dev_login_admin():
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    if app_env == "production":
+        return jsonify({"error": "dev admin login is disabled in production"}), 403
+
+    data = request.get_json(silent=True) or {}
+    email = str(data.get("email") or os.getenv("DEV_ADMIN_EMAIL") or "nravikant123@gmail.com").strip().lower()
+    name = str(data.get("display_name") or "Admin").strip() or "Admin"
+
+    if not email:
+        return jsonify({"error": "email is required"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        user = User(
+            name=name,
+            email=email,
+            password_hash=generate_password_hash(secrets.token_urlsafe(32)),
+        )
+        db.session.add(user)
+        db.session.flush()
+        _ensure_wallet(user.user_id)
+        _ensure_streak(user.user_id)
+        _ensure_profile(user.user_id)
+    elif name and user.name != name:
+        user.name = name
+
+    _ensure_admin_override(user, "local development admin login")
+    profile = _ensure_profile(user.user_id)
+    ensure_daily_and_weekly_progression(user.user_id, profile, datetime.utcnow().date())
+    db.session.commit()
+
+    token = _issue_token(user)
+    return jsonify({"access_token": token, "user": _serialize_user(user)})
 
 
 @auth_bp.post("/google/exchange")

@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Mail, Lock, Sparkles, BookOpen, TrendingUp } from 'lucide-react';
 
 export function Login() {
-  const { login, signup, beginGoogleLogin } = useAuth();
+  const { login, signup, beginGoogleLogin, beginDevAdminLogin } = useAuth();
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,6 +40,17 @@ export function Login() {
       await beginGoogleLogin();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Google login failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const handleDevAdminLogin = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await beginDevAdminLogin();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Admin login failed. Please try again.');
       setLoading(false);
     }
   };
@@ -191,6 +202,17 @@ export function Login() {
               </svg>
               Continue with Google
             </button>
+
+            {import.meta.env.DEV && (
+              <button
+                type="button"
+                onClick={handleDevAdminLogin}
+                disabled={loading}
+                className="w-full border border-emerald-200 bg-emerald-50 text-emerald-800 py-3 rounded-lg hover:bg-emerald-100 transition-colors flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                Continue as Admin (Local)
+              </button>
+            )}
 
             <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
               Use Google for one-click sign in, or create a local account with your email and password.

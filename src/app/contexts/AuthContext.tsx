@@ -26,6 +26,7 @@ interface AuthContextType {
   user: User | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
+  beginDevAdminLogin: () => Promise<void>;
   beginGoogleLogin: () => Promise<void>;
   completeGoogleLogin: (code: string, state?: string | null) => Promise<void>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
@@ -66,6 +67,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response = await apiFetch<Record<string, any>>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+      skipAuth: true,
+    });
+    setAuthToken(response.access_token ? String(response.access_token) : null);
+    setUser(mapUser(response.user));
+  };
+
+  const beginDevAdminLogin = async () => {
+    const response = await apiFetch<Record<string, any>>('/api/auth/dev-login-admin', {
+      method: 'POST',
       skipAuth: true,
     });
     setAuthToken(response.access_token ? String(response.access_token) : null);
@@ -173,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, ready, login, beginGoogleLogin, completeGoogleLogin, signup, logout, updateUser, refreshUser }}>
+    <AuthContext.Provider value={{ user, ready, login, beginDevAdminLogin, beginGoogleLogin, completeGoogleLogin, signup, logout, updateUser, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
