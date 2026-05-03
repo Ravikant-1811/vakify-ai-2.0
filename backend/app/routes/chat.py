@@ -172,6 +172,8 @@ def ask_chatbot():
         )
 
     result = generate_chat_response(question, effective_style, mode, history_context)
+    if result.get("error"):
+        return jsonify(result), int(result.get("status") or 503)
     practice_tasks, practice_source = generate_practice_tasks_from_topic(question, count=3, allow_ai=True)
     audio_download_id = None
     try:

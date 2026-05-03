@@ -24,6 +24,26 @@ def test_study_plan_endpoint_returns_plan(tmp_path, monkeypatch):
     )
     token = register.get_json()["access_token"]
 
+    from app.services import ai_learning_service
+
+    monkeypatch.setattr(
+        ai_learning_service,
+        "openai_json_schema",
+        lambda *args, **kwargs: {
+            "title": "AI Study Plan",
+            "learning_style": "visual",
+            "overview": "Focus on one measurable improvement area each day.",
+            "focus_area": "Recursion",
+            "strengths": ["Consistency"],
+            "gaps": ["Recursion"],
+            "today_plan": [{"title": "Review recursion", "minutes": 10, "action": "Review recursion", "success_criteria": "You can explain it."}],
+            "weekly_plan": [{"day": "Mon", "focus": "Recursion", "task": "Practice recursion"}],
+            "quick_wins": ["Solve one problem"],
+            "next_action": "Start with one recursion problem.",
+            "motivation": "Keep going.",
+        },
+    )
+
     response = client.get(
         "/api/ai/study-plan",
         headers={"Authorization": f"Bearer {token}"},

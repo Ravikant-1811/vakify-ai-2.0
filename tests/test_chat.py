@@ -13,6 +13,29 @@ def _client(tmp_path, monkeypatch):
 
 def test_structured_chat_response_and_history(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
+    from app.services import chatbot_service
+
+    monkeypatch.setattr(chatbot_service, "chatgpt_text", lambda *args, **kwargs: "AI explanation for the topic.")
+    monkeypatch.setattr(
+        chatbot_service,
+        "openai_json_schema",
+        lambda *args, **kwargs: {
+            "title": "Recursion Explained",
+            "summary": "A clear explanation of recursion.",
+            "answer": "Recursion is a function calling itself until a base case stops the loop.",
+            "key_points": ["Have a base case", "Reduce the problem", "Trust the recursion"],
+            "example": "Think of nested boxes where each box opens the next smaller box.",
+            "code_sample": "def recurse(n):\n    if n == 0:\n        return\n    recurse(n-1)",
+            "practice": "Write a function that prints numbers down to zero.",
+            "quiz_question": "What stops recursion?",
+            "quiz_options": ["Base case", "Loop", "Import", "Print"],
+            "follow_up_prompts": ["Show me a Python example", "What is a base case?"],
+            "next_step": "Try one small recursive function.",
+            "confidence": "High",
+            "mode": "detailed",
+            "style": "visual",
+        },
+    )
 
     register = client.post(
         "/api/auth/register",

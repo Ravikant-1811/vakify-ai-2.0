@@ -147,6 +147,10 @@ def _fallback_plan(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _allow_ai_fallback() -> bool:
+    return os.getenv("ALLOW_AI_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_ai_study_plan(user_id: int) -> dict[str, Any]:
     user = db.session.get(User, user_id)
     if not user:
@@ -219,6 +223,8 @@ def build_ai_study_plan(user_id: int) -> dict[str, Any]:
         temperature=0.25,
     )
     if not ai_plan:
+        if not _allow_ai_fallback():
+            return {"error": "OpenAI study plan unavailable", "status": 503}
         fallback = _fallback_plan(context)
         fallback["context"] = context
         return fallback

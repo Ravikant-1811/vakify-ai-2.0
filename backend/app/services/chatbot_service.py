@@ -422,6 +422,8 @@ def get_quick_prompts(topic: str, style: str) -> list[str]:
 def generate_adaptive_response(question: str, style: str) -> dict:
     topic = question.strip().rstrip("?")
     ai_text = _generate_chatgpt_explanation(question, style)
+    if not ai_text and not _allow_ai_fallback():
+        return {"error": "OpenAI chat text unavailable", "status": 503}
     text = ai_text or _fallback_response(question, style)
     ai_used = bool(ai_text)
 
@@ -640,6 +642,10 @@ def _fallback_chat_response(question: str, style: str, mode: str, recent_history
     }
 
 
+def _allow_ai_fallback() -> bool:
+    return os.getenv("ALLOW_AI_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def generate_chat_response(
     question: str,
     style: str,
@@ -655,6 +661,8 @@ def generate_chat_response(
         style_key = "visual"
 
     base = generate_adaptive_response(question, style_key)
+    if isinstance(base, dict) and base.get("error"):
+        return base
     history_text = _history_text(recent_history)
     base_text = str(base.get("text", "") or "").strip()
     base_assets = base.get("assets", {}) if isinstance(base.get("assets", {}), dict) else {}
@@ -690,6 +698,8 @@ def generate_chat_response(
 
     structured = openai_json_schema(system_prompt, user_prompt, CHAT_RESPONSE_SCHEMA, "chat_response", temperature=0.35)
     if not structured:
+        if not _allow_ai_fallback():
+            return {"error": "OpenAI chat response unavailable", "status": 503}
         structured = _fallback_chat_response(question, style_key, mode_key, recent_history)
 
     answer = str(structured.get("answer") or base_text or _fallback_response(question, style_key)).strip()

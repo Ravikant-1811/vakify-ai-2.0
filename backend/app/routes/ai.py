@@ -13,5 +13,5 @@ def study_plan():
     user_id = int(get_jwt_identity())
     plan = build_ai_study_plan(user_id)
     if plan.get("error"):
-        return jsonify(plan), 404
+        return jsonify(plan), int(plan.get("status") or 503)
     return jsonify(plan)
