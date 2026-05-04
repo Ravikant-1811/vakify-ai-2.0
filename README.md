@@ -30,7 +30,8 @@ Vakify is an AI-powered adaptive learning platform with a polished Figma-based f
 - `src/` - React frontend
 - `backend/` - Flask API and services
 - `tests/` - backend integration tests
-- `vercel.json` - Vercel build config for `dist/`
+- `vercel.json` - Vercel build config and SPA fallback routing
+- `render.yaml` - Render web service and Postgres setup for the Flask API
 
 ## Local Development
 
@@ -75,6 +76,20 @@ FLASK_DEBUG=0
 
 For Postgres or Neon, set `DATABASE_URL` to your Postgres connection string.
 
+For deployment, set these server-side values:
+
+```env
+APP_ENV=production
+SECRET_KEY=your-strong-secret
+JWT_SECRET_KEY=your-strong-jwt-secret
+DATABASE_URL=your-postgres-connection-string
+OPENAI_API_KEY=your-openai-key
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=https://your-vercel-domain/auth/google/callback
+CORS_ORIGINS=https://your-vercel-domain
+```
+
 ## Main Features
 
 ### AI Chat
@@ -115,15 +130,37 @@ npm run build
 
 ## Deployment Notes
 
+- Frontend deploys to Vercel
+- Backend deploys to Render with Postgres
 - Vite builds to `dist/`
 - `vercel.json` is configured with:
 
 ```json
 {
   "buildCommand": "npm run build",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }
 ```
+
+### Vercel
+
+- Framework preset: Vite
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variable: `VITE_API_BASE_URL=https://<your-render-api-domain>`
+
+### Render
+
+- Use `render.yaml` from the repo root
+- It provisions a Python web service and a managed Postgres database
+- After Render creates the API URL, copy it into Vercel as `VITE_API_BASE_URL`
+- Add the Google and OpenAI secrets in the Render dashboard if you prefer not to sync them from the repo
 
 ## API Summary
 
