@@ -5,6 +5,7 @@ from urllib.parse import quote_plus
 import os
 
 from app.services.openai_service import chatgpt_json, chatgpt_text, generate_image_data_url, openai_json_schema
+from app.services.admin_workspace import DEFAULT_CHATBOT_PROMPT, get_chatbot_config
 from urllib.parse import quote
 
 
@@ -652,6 +653,10 @@ def generate_chat_response(
     mode: str,
     recent_history: list[dict] | None = None,
 ) -> dict:
+    chatbot_config = get_chatbot_config()
+    if not chatbot_config.enabled:
+        return {"error": "Chatbot is temporarily disabled by admin", "status": 503}
+
     mode_key = (mode or "detailed").strip().lower()
     if mode_key not in {"concise", "detailed", "eli5", "exam"}:
         mode_key = "detailed"
@@ -667,8 +672,11 @@ def generate_chat_response(
     base_text = str(base.get("text", "") or "").strip()
     base_assets = base.get("assets", {}) if isinstance(base.get("assets", {}), dict) else {}
 
+    admin_prompt = str(chatbot_config.system_prompt or DEFAULT_CHATBOT_PROMPT).strip()
     system_prompt = (
-        "You are a friendly, helpful chat assistant for a learning app. "
+        f"{admin_prompt}\n"
+        f"Assistant name: {chatbot_config.assistant_name}.\n"
+        f"Admin response style: {chatbot_config.response_style}.\n"
         "Return polished JSON only, with a natural conversational answer plus organized support fields. "
         "The answer must sound human and direct, not robotic. "
         "Use concise, useful section values that make the UI easy to read."
@@ -722,6 +730,11 @@ def generate_chat_response(
     confidence = str(structured.get("confidence") or "High").strip().title()
     if confidence not in {"High", "Medium", "Low"}:
         confidence = "High"
+
+    max_chars = int(chatbot_config.max_response_chars or 1200)
+    if max_chars > 0:
+        answer = answer[:max_chars]
+        summary = summary[: max(120, min(max_chars, 260))]
 
     return {
         "title": str(structured.get("title") or _safe_label(question or "Conversation", 40)).strip(),

@@ -28,7 +28,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   beginDevAdminLogin: () => Promise<void>;
   beginGoogleLogin: () => Promise<void>;
-  completeGoogleLogin: (code: string, state?: string | null) => Promise<void>;
+  completeGoogleLogin: (code: string, state?: string | null) => Promise<User>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => void;
   updateUser: (updates: Partial<User>) => Promise<void>;
@@ -121,7 +121,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.sessionStorage.removeItem('vakify.google_oauth_state');
     window.sessionStorage.removeItem('vakify.google_oauth_redirect');
     setAuthToken(response.access_token ? String(response.access_token) : null);
-    setUser(mapUser(response.user));
+    const nextUser = mapUser(response.user);
+    setUser(nextUser);
+    return nextUser;
   };
 
   const signup = async (email: string, password: string, displayName: string) => {

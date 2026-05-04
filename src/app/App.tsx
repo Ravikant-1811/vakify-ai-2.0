@@ -34,6 +34,50 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return <Layout>{children}</Layout>;
 }
 
+function LearnerRoute({ children }: { children: React.ReactNode }) {
+  const { user, ready } = useAuth();
+
+  if (!ready) {
+    return null;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user.role === 'admin') {
+    return <Navigate to="/admin" replace />;
+  }
+
+  if (!user.onboarded) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  return <Layout>{children}</Layout>;
+}
+
+function AdminRoute({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { user, ready } = useAuth();
+
+  if (!ready) {
+    return null;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user.role !== 'admin') {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Layout>{children}</Layout>;
+}
+
 function RoleRoute({
   children,
   allow,
@@ -49,10 +93,6 @@ function RoleRoute({
 
   if (!user) {
     return <Navigate to="/login" replace />;
-  }
-
-  if (!user.onboarded) {
-    return <Navigate to="/onboarding" replace />;
   }
 
   if (!allow.includes(user.role as 'admin' | 'moderator')) {
@@ -71,22 +111,26 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to={user.role === 'admin' ? '/admin' : '/dashboard'} replace /> : <Login />} />
       <Route path="/auth/google/callback" element={<GoogleCallback />} />
-      <Route path="/onboarding" element={user && !user.onboarded ? <Onboarding /> : <Navigate to="/dashboard" replace />} />
+      <Route path="/onboarding" element={
+        user && !user.onboarded && user.role !== 'admin'
+          ? <Onboarding />
+          : <Navigate to={user?.role === 'admin' ? '/admin' : '/dashboard'} replace />
+      } />
 
-      <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-      <Route path="/chat" element={<PrivateRoute><AIChat /></PrivateRoute>} />
-      <Route path="/lab" element={<PrivateRoute><CodingLab /></PrivateRoute>} />
-      <Route path="/playground" element={<PrivateRoute><TrainingCoder /></PrivateRoute>} />
-      <Route path="/tasks" element={<PrivateRoute><TasksQuiz /></PrivateRoute>} />
-      <Route path="/rewards" element={<PrivateRoute><Rewards /></PrivateRoute>} />
-      <Route path="/insights" element={<PrivateRoute><Insights /></PrivateRoute>} />
+      <Route path="/dashboard" element={<LearnerRoute><Dashboard /></LearnerRoute>} />
+      <Route path="/chat" element={<LearnerRoute><AIChat /></LearnerRoute>} />
+      <Route path="/lab" element={<LearnerRoute><CodingLab /></LearnerRoute>} />
+      <Route path="/playground" element={<LearnerRoute><TrainingCoder /></LearnerRoute>} />
+      <Route path="/tasks" element={<LearnerRoute><TasksQuiz /></LearnerRoute>} />
+      <Route path="/rewards" element={<LearnerRoute><Rewards /></LearnerRoute>} />
+      <Route path="/insights" element={<LearnerRoute><Insights /></LearnerRoute>} />
       <Route path="/moderation" element={<RoleRoute allow={['admin', 'moderator']}><Moderation /></RoleRoute>} />
-      <Route path="/admin" element={<RoleRoute allow={['admin']}><AdminConsole /></RoleRoute>} />
-      <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
+      <Route path="/admin" element={<AdminRoute><AdminConsole /></AdminRoute>} />
+      <Route path="/settings" element={<LearnerRoute><Settings /></LearnerRoute>} />
 
-      <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Landing />} />
+      <Route path="/" element={user ? <Navigate to={user.role === 'admin' ? '/admin' : '/dashboard'} replace /> : <Landing />} />
     </Routes>
   );
 }

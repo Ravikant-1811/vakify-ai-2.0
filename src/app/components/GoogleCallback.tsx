@@ -23,8 +23,8 @@ export function GoogleCallback() {
       }
 
       try {
-        await completeGoogleLogin(code, state);
-        navigate('/dashboard', { replace: true });
+        const nextUser = await completeGoogleLogin(code, state);
+        navigate(nextUser.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unable to complete Google login.');
       }

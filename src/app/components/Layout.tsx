@@ -47,11 +47,12 @@ export function Layout({ children }: LayoutProps) {
     { icon: Users, label: 'Admin Console', path: '/admin' },
   ];
 
-  const allNav = [
-    ...learnerNav,
-    ...(isModerator ? moderatorNav : []),
-    ...(isAdmin ? adminNav : []),
-  ];
+  const allNav = isAdmin
+    ? adminNav
+    : [
+        ...learnerNav,
+        ...(isModerator ? moderatorNav : []),
+      ];
 
   return (
     <div className="flex h-screen bg-background">
@@ -83,6 +84,11 @@ export function Layout({ children }: LayoutProps) {
                   {user?.xp} XP
                 </div>
               </div>
+              {isAdmin && (
+                <div className="mt-3 inline-flex rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                  Admin workspace
+                </div>
+              )}
             </div>
           </div>
 

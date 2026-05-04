@@ -265,6 +265,24 @@ class UserRoleOverride(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class ChatbotConfig(db.Model):
+    __tablename__ = "chatbot_config"
+
+    config_id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
+    assistant_name = db.Column(db.String(120), nullable=False, default="Vakify AI")
+    response_style = db.Column(db.String(40), nullable=False, default="friendly")
+    max_response_chars = db.Column(db.Integer, nullable=False, default=1200)
+    system_prompt = db.Column(db.Text, nullable=False, default=(
+        "You are Vakify's admin-managed AI tutor. "
+        "Answer naturally, clearly, and help learners make progress. "
+        "Stay concise unless the question needs depth."
+    ))
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.user_id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class CodeLabTask(db.Model):
     __tablename__ = "code_lab_tasks"
 

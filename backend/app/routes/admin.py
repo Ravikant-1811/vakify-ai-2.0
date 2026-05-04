@@ -5,8 +5,25 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import User, LearningStyle, ChatHistory, PracticeActivity, Download, ChatFeedback, RewardWallet, XPEvent, UserRoleOverride
+from app.models import (
+    ChatFeedback,
+    ChatHistory,
+    Download,
+    LearningStyle,
+    PracticeActivity,
+    RewardWallet,
+    User,
+    UserRoleOverride,
+    XPEvent,
+)
 from app.services.admin_auth import get_role_for_email, is_admin_email
+from app.services.admin_workspace import (
+    get_chatbot_config,
+    leaderboard_management_payload,
+    rebuild_leaderboard_snapshots,
+    serialize_chatbot_config,
+    update_chatbot_config,
+)
 from app.services.user_cleanup import delete_user_with_related_data
 
 
@@ -273,3 +290,52 @@ def analytics():
             },
         }
     )
+
+
+@admin_bp.get("/chatbot-config")
+@jwt_required()
+def chatbot_config():
+    _, err = _require_admin()
+    if err:
+        return err
+
+    config = get_chatbot_config()
+    return jsonify(serialize_chatbot_config(config))
+
+
+@admin_bp.put("/chatbot-config")
+@jwt_required()
+def update_chatbot_config_route():
+    admin_user, err = _require_admin()
+    if err:
+        return err
+
+    payload = request.get_json() or {}
+    config = update_chatbot_config(payload, updated_by=admin_user.user_id)
+    return jsonify(
+        {
+            "message": "chatbot config updated",
+            "config": serialize_chatbot_config(config),
+        }
+    )
+
+
+@admin_bp.get("/leaderboard")
+@jwt_required()
+def leaderboard_management():
+    _, err = _require_admin()
+    if err:
+        return err
+
+    return jsonify(leaderboard_management_payload())
+
+
+@admin_bp.post("/leaderboard/refresh")
+@jwt_required()
+def refresh_leaderboard():
+    _, err = _require_admin()
+    if err:
+        return err
+
+    leaderboard = rebuild_leaderboard_snapshots()
+    return jsonify({"message": "leaderboard refreshed", "leaderboard": leaderboard})
