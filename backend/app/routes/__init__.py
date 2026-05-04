@@ -1,4 +1,5 @@
 from app.routes.admin import admin_bp
+from app.routes.assessment import assessment_bp
 from app.routes.ai import ai_bp
 from app.routes.auth import auth_bp
 from app.routes.chat import chat_bp
@@ -25,5 +26,6 @@ def register_blueprints(app):
     app.register_blueprint(settings_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(progression_bp)
+    app.register_blueprint(assessment_bp)
     # Admin only
     app.register_blueprint(admin_bp)
