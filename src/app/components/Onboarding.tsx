@@ -52,6 +52,7 @@ export function Onboarding() {
       try {
         const response = await apiFetch<{ questions: AssessmentQuestion[] }>(
           `/api/assessment/questions?language=${encodeURIComponent(preferredLanguage)}`,
+          { skipAuth: true },
         );
         setAssessmentQuestions(response.questions || []);
         setAssessmentAnswers((current) => {

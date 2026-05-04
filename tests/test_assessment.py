@@ -32,6 +32,12 @@ def test_assessment_questions_and_submission(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     token = _register(client, "assessment@example.com", "Assessment Learner")
 
+    public_questions = client.get("/api/assessment/questions?language=python")
+    assert public_questions.status_code == 200
+    public_questions_data = public_questions.get_json()
+    assert public_questions_data["language"] == "python"
+    assert len(public_questions_data["questions"]) == 10
+
     questions = client.get(
         "/api/assessment/questions?language=python",
         headers={"Authorization": f"Bearer {token}"},
