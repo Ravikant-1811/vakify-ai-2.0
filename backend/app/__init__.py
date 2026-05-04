@@ -20,7 +20,7 @@ def create_app():
     cors_origins = cors_origins_from_env()
     CORS(
         app,
-        resources={r"/api/*": {"origins": cors_origins}},
+        resources={r"/api/.*": {"origins": cors_origins}},
         supports_credentials=False,
     )
 
