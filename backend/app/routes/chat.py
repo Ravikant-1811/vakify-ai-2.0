@@ -268,8 +268,9 @@ def generate_chat_image():
         source_payload = _safe_parse_response(source_row.response) or {}
         prompt = prompt or str(
             source_payload.get("image_prompt")
-            or source_payload.get("answer")
-            or source_payload.get("summary")
+            or source_payload.get("question")
+            or source_row.question
+            or source_payload.get("title")
             or source_row.question
             or ""
         ).strip()

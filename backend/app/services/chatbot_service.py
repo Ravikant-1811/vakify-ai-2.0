@@ -261,31 +261,26 @@ def _generate_prompt_suggestions(topic: str, style: str) -> list[str]:
     return fallback[:6]
 
 
-def _image_prompt_from_chat(question: str, answer: str, style: str, title: str | None = None) -> str:
-    base_topic = _safe_label(question or answer or title or "this topic", 90)
+def _image_prompt_from_chat(
+    question: str,
+    style: str,
+    title: str | None = None,
+    summary: str | None = None,
+    key_points: list[str] | None = None,
+) -> str:
+    base_topic = _safe_label(title or question or summary or "this topic", 90)
     style = (style or "visual").strip().lower()
     style_hint = {
         "visual": "clean infographic, clear labels, simple iconography, bright educational style",
         "auditory": "speech-bubble style visual summary, soundwave accent, minimal infographic layout",
         "kinesthetic": "step-by-step action diagram, hands-on workflow, task cards and arrows",
     }.get(style, "clean educational infographic")
-    raw = chatgpt_text(
-        "You write concise image prompts for educational visuals. Return one line only.",
-        (
-            f"Topic: {base_topic}\n"
-            f"Style hint: {style_hint}\n"
-            f"Answer summary: {(answer or '')[:500]}\n"
-            f"Title: {title or ''}\n"
-            "Write a single Leonardo image prompt that is specific, visually clear, and suitable for a student learning platform."
-        ),
-        temperature=0.55,
-    )
-    if raw:
-        prompt = raw.strip().strip('"').strip("'")
-        if len(prompt) >= 20:
-            return _safe_label(prompt, 380)
+    topic_points = [str(point).strip() for point in (key_points or []) if str(point).strip()]
+    if not topic_points:
+        topic_points = _topic_keywords(summary or question or title or base_topic)[:4]
+    focus_line = ", ".join(topic_points[:4]) if topic_points else "the main concept, one example, and one key takeaway"
     return _safe_label(
-        f"Create a clean educational infographic for {base_topic}. Use {style_hint}. Focus on the main idea, keep labels short, and make the concept easy to study at a glance.",
+        f"Create a clean educational infographic for {base_topic}. Focus on {focus_line}. Use {style_hint}. Keep labels short, add arrows or simple diagrams, and make the concept easy to study at a glance. No long paragraphs, no code blocks, no watermarks.",
         380,
     )
 
@@ -656,7 +651,7 @@ def _fallback_chat_response(question: str, style: str, mode: str, recent_history
     if not key_points:
         key_points = ["Clarify the goal", "Break the problem into steps", "Test with edge cases"]
     code_sample = _code_sample_for_topic(question, style)
-    image_prompt = _image_prompt_from_chat(question, base, style, title)
+    image_prompt = _image_prompt_from_chat(question, style, title=title, summary=base, key_points=key_points)
     return {
         "title": title,
         "summary": f"A {mode} response for {question.strip() or 'your topic'} with a clear breakdown.",
@@ -762,7 +757,13 @@ def generate_chat_response(
     next_step = str(structured.get("next_step") or "").strip()
     image_prompt = str(structured.get("image_prompt") or "").strip()
     if not image_prompt:
-        image_prompt = _image_prompt_from_chat(question, answer, style_key, str(structured.get("title") or "").strip())
+        image_prompt = _image_prompt_from_chat(
+            question,
+            style_key,
+            title=str(structured.get("title") or "").strip(),
+            summary=str(structured.get("summary") or "").strip() or answer,
+            key_points=[str(item).strip() for item in (structured.get("key_points") or []) if str(item).strip()],
+        )
     confidence = str(structured.get("confidence") or "High").strip().title()
     if confidence not in {"High", "Medium", "Low"}:
         confidence = "High"
