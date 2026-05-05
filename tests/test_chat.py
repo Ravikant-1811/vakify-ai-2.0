@@ -130,3 +130,61 @@ def test_structured_chat_response_and_history(tmp_path, monkeypatch):
     assert len(first_history) == 1
     assert len(second_history) == 1
     assert first_history[0]["question"] != second_history[0]["question"]
+
+
+def test_chat_image_generation_and_history(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    import app.routes.chat as chat_routes
+
+    monkeypatch.setattr(chat_routes, "generate_image_data_url", lambda *args, **kwargs: "https://example.com/generated.png")
+
+    register = client.post(
+        "/api/auth/register",
+        json={
+            "email": "image@example.com",
+            "password": "secret123",
+            "display_name": "Image Learner",
+        },
+    )
+    token = register.get_json()["access_token"]
+
+    style = client.post(
+        "/api/style/select",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"learning_style": "visual"},
+    )
+    assert style.status_code == 200
+
+    thread = client.post(
+        "/api/chat/threads",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "Image Chat"},
+    )
+    assert thread.status_code == 201
+    thread_id = thread.get_json()["thread_id"]
+
+    response = client.post(
+        "/api/chat/image",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "prompt": "Create a simple diagram of a binary tree",
+            "thread_id": thread_id,
+        },
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["image_url"] == "https://example.com/generated.png"
+    assert data["response_type"] == "visual"
+    assert data["thread_id"] == thread_id
+    assert data["chat_id"]
+
+    history = client.get(
+        f"/api/chat/history?thread_id={thread_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert history.status_code == 200
+    rows = history.get_json()
+    assert len(rows) == 1
+    assert rows[0]["response_json"]["image_url"] == "https://example.com/generated.png"
+    assert rows[0]["response_json"]["mode"] == "image"

@@ -18,6 +18,7 @@ from app.models import (
 from app.services.chatbot_service import generate_chat_response, get_quick_prompts
 from app.services.download_service import create_download_file
 from app.services.practice_task_service import generate_practice_tasks_from_topic
+from app.services.openai_service import generate_image_data_url
 
 
 chat_bp = Blueprint("chat", __name__, url_prefix="/api/chat")
@@ -238,6 +239,74 @@ def ask_chatbot():
     result["thread_id"] = thread.thread_id
     result["thread_title"] = thread.title
     return jsonify(result)
+
+
+@chat_bp.post("/image")
+@jwt_required()
+def generate_chat_image():
+    user_id = int(get_jwt_identity())
+    payload = request.get_json(silent=True) or {}
+    prompt = str(payload.get("prompt", "")).strip()
+    if not prompt:
+        return jsonify({"error": "prompt is required"}), 400
+
+    requested_thread_id = payload.get("thread_id")
+    try:
+        requested_thread_id = int(requested_thread_id) if requested_thread_id not in {None, "", 0} else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "thread_id must be a number"}), 400
+
+    thread = _resolve_thread(user_id, requested_thread_id, title_hint=_topic_title(prompt))
+    if not thread:
+        return jsonify({"error": "thread not found"}), 404
+
+    image_url = generate_image_data_url(prompt, size=str(payload.get("size", "1024x1024")))
+    if not image_url:
+        return jsonify({"error": "Image generation is temporarily unavailable"}), 503
+
+    title = str(payload.get("title") or "Generated Image").strip() or "Generated Image"
+    response_payload = {
+        "title": title,
+        "summary": f"Generated an image for: {prompt[:180]}",
+        "answer": "Image generated successfully. Use the preview below or open the attachment.",
+        "image_url": image_url,
+        "image_prompt": prompt,
+        "confidence": "High",
+        "response_type": "visual",
+        "mode": "image",
+        "style": "visual",
+        "follow_up_prompts": [
+            "Generate another variation",
+            "Make it more detailed",
+            "Turn this into a diagram",
+        ],
+    }
+
+    try:
+        history = ChatHistory(
+            user_id=user_id,
+            question=prompt,
+            response=json.dumps(response_payload, ensure_ascii=False),
+            response_type="visual",
+            learning_style_used="visual",
+        )
+        db.session.add(history)
+        db.session.flush()
+        db.session.add(ChatThreadMessage(thread_id=thread.thread_id, chat_id=history.chat_id, user_id=user_id))
+        thread.message_count = (thread.message_count or 0) + 1
+        thread.last_message_at = history.timestamp
+        thread.preview = _truncate(prompt, 280)
+        if not thread.title or thread.title == "New Chat":
+            thread.title = _topic_title(prompt)
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "temporary database issue. please retry"}), 503
+
+    response_payload["chat_id"] = history.chat_id
+    response_payload["thread_id"] = thread.thread_id
+    response_payload["thread_title"] = thread.title
+    return jsonify(response_payload)
 
 
 @chat_bp.get("/threads")

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from typing import Any
 from pathlib import Path
 from math import gcd
@@ -13,6 +14,7 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech"
 OPENAI_IMAGE_URL = "https://api.openai.com/v1/images/generations"
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1/text-to-speech"
+LEONARDO_BASE_URL = "https://cloud.leonardo.ai/api/rest/v1"
 NVIDIA_IMAGE_URL = "https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-3-medium"
 OPENAI_DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4").strip() or "gpt-5.4"
 OPENAI_FAST_MODEL = os.getenv("OPENAI_FAST_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini"
@@ -287,6 +289,76 @@ def generate_tts_mp3(text: str, output_path: str) -> bool:
 def generate_image_data_url(prompt: str, size: str = "1024x1024") -> str | None:
     if not prompt.strip():
         return None
+
+    leonardo_key = os.getenv("LEONARDO_API_KEY", "").strip()
+    if leonardo_key:
+        try:
+            width = 1024
+            height = 1024
+            if "x" in size:
+                w_raw, h_raw = size.lower().split("x", 1)
+                width = max(256, min(1536, int(w_raw)))
+                height = max(256, min(1536, int(h_raw)))
+
+            payload: dict[str, Any] = {
+                "prompt": prompt[:3200],
+                "width": width,
+                "height": height,
+                "num_images": 1,
+                "alchemy": True,
+                "promptMagic": False,
+                "highContrast": False,
+                "public": False,
+            }
+            model_id = os.getenv("LEONARDO_MODEL_ID", "").strip()
+            if model_id:
+                payload["modelId"] = model_id
+
+            response = requests.post(
+                f"{LEONARDO_BASE_URL}/generations",
+                headers={
+                    "Authorization": f"Bearer {leonardo_key}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=35,
+            )
+            response.raise_for_status()
+            generation_payload = response.json() or {}
+            generation_id = str(
+                generation_payload.get("generationId")
+                or generation_payload.get("generation_id")
+                or generation_payload.get("id")
+                or ""
+            ).strip()
+            if generation_id:
+                deadline = time.monotonic() + 45
+                while time.monotonic() < deadline:
+                    poll = requests.get(
+                        f"{LEONARDO_BASE_URL}/generations/{generation_id}",
+                        headers={
+                            "Authorization": f"Bearer {leonardo_key}",
+                            "Accept": "application/json",
+                        },
+                        timeout=30,
+                    )
+                    poll.raise_for_status()
+                    data = poll.json() or {}
+                    generation = data.get("generations_by_pk") or data.get("generation") or data
+                    status = str(generation.get("status") or "").upper()
+                    images = generation.get("generated_images") or []
+                    if images and isinstance(images, list):
+                        first = images[0] or {}
+                        url = first.get("url") or first.get("image_url") or first.get("source") or first.get("thumbnailUrl")
+                        if url:
+                            return str(url)
+                    if status == "COMPLETE" and not images:
+                        time.sleep(2)
+                        continue
+                    time.sleep(2)
+        except Exception:
+            pass
 
     nvidia_key = os.getenv("NVIDIA_IMAGE_API_KEY", "").strip()
     nvidia_url = os.getenv("NVIDIA_IMAGE_URL", NVIDIA_IMAGE_URL).strip()

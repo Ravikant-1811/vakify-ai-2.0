@@ -27,6 +27,8 @@ services:
         value: EXAVITQu4vr4xnSDxMaL
       - key: ELEVENLABS_MODEL_ID
         value: eleven_multilingual_v2
+      - key: LEONARDO_MODEL_ID
+        value: lucid-origin
 
 databases:
   - name: vakify-db

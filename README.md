@@ -72,6 +72,8 @@ OPENAI_API_KEY=your-openai-key
 ELEVENLABS_API_KEY=your-elevenlabs-api-key
 ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
 ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+LEONARDO_API_KEY=your-leonardo-api-key
+LEONARDO_MODEL_ID=your-leonardo-model-id
 CORS_ORIGINS=*
 APP_ENV=development
 FLASK_DEBUG=0
@@ -90,6 +92,8 @@ OPENAI_API_KEY=your-openai-key
 ELEVENLABS_API_KEY=your-elevenlabs-api-key
 ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
 ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+LEONARDO_API_KEY=your-leonardo-api-key
+LEONARDO_MODEL_ID=your-leonardo-model-id
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_REDIRECT_URI=https://your-vercel-domain/auth/google/callback
@@ -103,6 +107,7 @@ CORS_ORIGINS=https://your-vercel-domain
 - Saves each conversation as a thread
 - Stores question, response, feedback, and thread metadata in the database
 - Supports rich formatted assistant replies
+- Supports image generation in chat when `LEONARDO_API_KEY` is configured
 
 ### Coding Lab
 

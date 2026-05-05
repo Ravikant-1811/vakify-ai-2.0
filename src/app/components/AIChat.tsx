@@ -11,6 +11,7 @@ import {
   Clock3,
   Trash2,
   PenLine,
+  ImagePlus,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 
@@ -36,6 +37,8 @@ type ChatPayload = {
   chat_id?: number;
   thread_id?: number;
   thread_title?: string;
+  image_url?: string;
+  image_prompt?: string;
 };
 
 type ThreadSummary = {
@@ -65,6 +68,7 @@ export function AIChat() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<number | null>(null);
+  const [generatingImage, setGeneratingImage] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -223,6 +227,69 @@ export function AIChat() {
       ]);
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleGenerateImage = async () => {
+    const prompt = input.trim();
+    if (!prompt || sending || generatingImage) return;
+
+    const userMessage: Message = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: prompt,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setGeneratingImage(true);
+
+    try {
+      let threadId = activeThreadId;
+      if (!threadId) {
+        const createdThread = await apiFetch<ThreadSummary>('/api/chat/threads', {
+          method: 'POST',
+          body: JSON.stringify({ title: prompt.slice(0, 80) || 'New Chat' }),
+        });
+        threadId = createdThread.thread_id;
+        setThreads((prev) => [createdThread, ...prev.filter((item) => item.thread_id !== createdThread.thread_id)]);
+        setActiveThreadId(threadId);
+      }
+
+      const response = await apiFetch<ChatPayload>('/api/chat/image', {
+        method: 'POST',
+        body: JSON.stringify({ prompt, thread_id: threadId }),
+      });
+
+      const assistantMessage: Message = {
+        id: `img-${Date.now()}`,
+        role: 'assistant',
+        content: response.answer || 'Image generated successfully.',
+        confidence: response.confidence || 'High',
+        timestamp: new Date(),
+        chatId: response.chat_id,
+        followUps: response.follow_up_prompts?.slice(0, 4) || [],
+        structured: response,
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+      if (response.thread_id && response.thread_id !== threadId) {
+        setActiveThreadId(response.thread_id);
+      }
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `img-${Date.now()}`,
+          role: 'assistant',
+          content: error instanceof Error ? error.message : 'Sorry, the image generator is temporarily unavailable.',
+          confidence: 'Low',
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setGeneratingImage(false);
     }
   };
 
@@ -513,8 +580,17 @@ export function AIChat() {
             <div className="text-xs text-muted-foreground mb-2">
               Ask naturally. The assistant keeps the conversation context.
             </div>
-            <div className="flex items-end gap-3 rounded-[28px] border border-border/70 bg-background p-3 shadow-[0_8px_30px_-22px_rgba(15,23,42,0.35)]">
-              <div className="flex-1">
+            <div className="flex flex-wrap items-end gap-3 rounded-[28px] border border-border/70 bg-background p-3 shadow-[0_8px_30px_-22px_rgba(15,23,42,0.35)]">
+              <button
+                onClick={() => void handleGenerateImage()}
+                disabled={!input.trim() || sending || generatingImage}
+                className="inline-flex items-center gap-2 rounded-2xl border border-border bg-background px-4 py-4 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                title="Generate an image from the prompt"
+              >
+                <ImagePlus className="w-4 h-4" />
+                {generatingImage ? 'Creating...' : 'Image'}
+              </button>
+              <div className="flex-1 min-w-[14rem]">
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -565,6 +641,8 @@ function buildClipboardText(message: Message) {
   if (structured.practice) lines.push(`Practice:\n${structured.practice}`, '');
   if (structured.quiz_question) lines.push(`Quick check:\n${structured.quiz_question}`, '');
   if (structured.next_step) lines.push(`Next step:\n${structured.next_step}`, '');
+  if (structured.image_prompt) lines.push(`Image prompt:\n${structured.image_prompt}`, '');
+  if (structured.image_url) lines.push(`Image URL:\n${structured.image_url}`, '');
   if (structured.follow_up_prompts?.length) {
     lines.push('Follow-up prompts:');
     structured.follow_up_prompts.forEach((prompt, index) => lines.push(`${index + 1}. ${prompt}`));
@@ -586,6 +664,7 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
   const hasPractice = Boolean(structured.practice?.trim());
   const hasQuiz = Boolean(structured.quiz_question?.trim() || quizOptions.length);
   const hasNextStep = Boolean(structured.next_step?.trim());
+  const hasImage = Boolean(structured.image_url?.trim());
 
   return (
     <div className="space-y-5 text-sm leading-7 text-foreground/95">
@@ -626,6 +705,29 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
           {renderRichContent(structured.answer || message.content)}
         </div>
       </div>
+
+      {hasImage ? (
+        <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Image Result</div>
+              <div className="text-sm text-muted-foreground">
+                {structured.image_prompt ? `Prompt: ${structured.image_prompt}` : 'Generated visual response.'}
+              </div>
+            </div>
+            <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
+              Visual
+            </span>
+          </div>
+          <div className="mt-4 overflow-hidden rounded-3xl border border-border/70 bg-muted/20">
+            <img
+              src={structured.image_url}
+              alt={structured.image_prompt || structured.title || 'Generated visual'}
+              className="h-auto w-full max-h-[28rem] object-cover"
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-12">
         <div className="rounded-3xl border border-border/70 bg-background px-4 py-4 md:px-5 xl:col-span-7">
