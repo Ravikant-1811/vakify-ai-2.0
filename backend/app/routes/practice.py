@@ -1,32 +1,28 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
-from app.models import PracticeActivity, LearningStyle, ChatHistory
-from app.services.lab_runner import run_java_code
+from app.models import PracticeActivity, ChatHistory, UserProfile
+from app.services.code_lab_service import run_code as execute_code
 from app.services.practice_task_service import generate_practice_tasks_from_topic, get_topic_catalog
 
 
 practice_bp = Blueprint("practice", __name__, url_prefix="/api/practice")
 
 
-def _ensure_kinesthetic(user_id: int):
-    style_row = LearningStyle.query.get(user_id)
-    if not style_row:
-        return jsonify({"error": "learning style not set"}), 400
-    if style_row.learning_style != "kinesthetic":
-        return jsonify({"error": "practice lab is available only for kinesthetic users"}), 403
-    return None
+def _preferred_language(user_id: int) -> str:
+    profile = db.session.get(UserProfile, user_id)
+    if profile and isinstance(profile.preferred_languages, list) and profile.preferred_languages:
+        return str(profile.preferred_languages[0]).strip().lower()
+    return "python"
 
 
 @practice_bp.get("/tasks")
 @jwt_required()
 def tasks():
     user_id = int(get_jwt_identity())
-    guard = _ensure_kinesthetic(user_id)
-    if guard:
-        return guard
 
     requested_topic = request.args.get("topic", "").strip()
+    requested_language = request.args.get("language", "").strip().lower() or _preferred_language(user_id)
     if requested_topic:
         topic = requested_topic
     else:
@@ -36,17 +32,16 @@ def tasks():
             .first()
         )
         topic = latest_chat.question if latest_chat else "Java exception handling"
-    generated_tasks, source = generate_practice_tasks_from_topic(topic, count=3)
-    return jsonify({"tasks": generated_tasks, "topic": topic, "source": source})
+    generated_tasks, source = generate_practice_tasks_from_topic(topic, language=requested_language, count=3, allow_ai=True)
+    if not generated_tasks:
+        return jsonify({"error": "practice tasks unavailable right now"}), 503
+    return jsonify({"tasks": generated_tasks, "topic": topic, "language": requested_language, "source": source})
 
 
 @practice_bp.get("/topics")
 @jwt_required()
 def topics():
     user_id = int(get_jwt_identity())
-    guard = _ensure_kinesthetic(user_id)
-    if guard:
-        return guard
     return jsonify({"topics": get_topic_catalog()})
 
 
@@ -54,15 +49,14 @@ def topics():
 @jwt_required()
 def run_code():
     user_id = int(get_jwt_identity())
-    guard = _ensure_kinesthetic(user_id)
-    if guard:
-        return guard
 
-    source_code = (request.get_json() or {}).get("source_code", "")
+    payload = request.get_json() or {}
+    source_code = payload.get("source_code", "")
     if not source_code.strip():
         return jsonify({"error": "source_code is required"}), 400
 
-    result = run_java_code(source_code)
+    language = str(payload.get("language") or _preferred_language(user_id)).strip().lower()
+    result = execute_code(language, source_code, str(payload.get("stdin", "")))
     return jsonify(result)
 
 
@@ -70,9 +64,6 @@ def run_code():
 @jwt_required()
 def submit_activity():
     user_id = int(get_jwt_identity())
-    guard = _ensure_kinesthetic(user_id)
-    if guard:
-        return guard
 
     data = request.get_json() or {}
     task_name = data.get("task_name", "").strip()
@@ -103,9 +94,6 @@ def submit_activity():
 @jwt_required()
 def my_activities():
     user_id = int(get_jwt_identity())
-    guard = _ensure_kinesthetic(user_id)
-    if guard:
-        return guard
 
     rows = (
         PracticeActivity.query.filter_by(user_id=user_id)
@@ -131,9 +119,6 @@ def my_activities():
 @jwt_required()
 def get_activity(activity_id: int):
     user_id = int(get_jwt_identity())
-    guard = _ensure_kinesthetic(user_id)
-    if guard:
-        return guard
 
     row = PracticeActivity.query.filter_by(activity_id=activity_id, user_id=user_id).first()
     if not row:
@@ -156,9 +141,6 @@ def get_activity(activity_id: int):
 @jwt_required()
 def update_activity(activity_id: int):
     user_id = int(get_jwt_identity())
-    guard = _ensure_kinesthetic(user_id)
-    if guard:
-        return guard
 
     row = PracticeActivity.query.filter_by(activity_id=activity_id, user_id=user_id).first()
     if not row:
@@ -194,9 +176,6 @@ def update_activity(activity_id: int):
 @jwt_required()
 def delete_activity(activity_id: int):
     user_id = int(get_jwt_identity())
-    guard = _ensure_kinesthetic(user_id)
-    if guard:
-        return guard
 
     row = PracticeActivity.query.filter_by(activity_id=activity_id, user_id=user_id).first()
     if not row:

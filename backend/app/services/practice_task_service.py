@@ -1,4 +1,34 @@
+import os
+
 from app.services.openai_service import chatgpt_json
+
+
+SUPPORTED_PRACTICE_LANGUAGES = {"python", "javascript", "java", "c", "c++"}
+
+
+def _normalize_language(language: str | None) -> str:
+    key = (language or "python").strip().lower()
+    if key in {"js", "node"}:
+        return "javascript"
+    if key in {"cpp"}:
+        return "c++"
+    if key not in SUPPORTED_PRACTICE_LANGUAGES:
+        return "python"
+    return key
+
+
+def _language_display(language: str | None) -> str:
+    return {
+        "python": "Python",
+        "javascript": "JavaScript",
+        "java": "Java",
+        "c": "C",
+        "c++": "C++",
+    }[_normalize_language(language)]
+
+
+def _allow_practice_fallback() -> bool:
+    return os.getenv("ALLOW_PRACTICE_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 DEFAULT_TASKS = [
@@ -967,17 +997,29 @@ def get_topic_catalog() -> list[dict]:
     return catalog
 
 
-def _validate_tasks(items: list[dict]) -> list[dict]:
+def _validate_tasks(items: list[dict], language: str) -> list[dict]:
     valid = []
     name_counts: dict[str, int] = {}
+    language_key = _normalize_language(language)
     for item in items:
         task_name = str(item.get("task_name", "")).strip()
         description = str(item.get("description", "")).strip()
         starter_code = str(item.get("starter_code", "")).strip()
         if not task_name or not description or not starter_code:
             continue
-        if "class" not in starter_code or "main" not in starter_code:
-            continue
+        code_lower = starter_code.lower()
+        if language_key == "java":
+            if "class" not in code_lower or "main" not in code_lower:
+                continue
+        elif language_key in {"c", "c++"}:
+            if "int main" not in code_lower:
+                continue
+        elif language_key == "javascript":
+            if "function" not in code_lower and "=>" not in starter_code and "console.log" not in code_lower:
+                continue
+        else:
+            if "def " not in code_lower and "if __name__" not in code_lower:
+                continue
         key = task_name.lower()
         idx = name_counts.get(key, 0) + 1
         name_counts[key] = idx
@@ -990,6 +1032,42 @@ def _validate_tasks(items: list[dict]) -> list[dict]:
             }
         )
     return valid
+
+
+def _generate_ai_practice_tasks(topic: str, language: str, count: int) -> tuple[list[dict], str]:
+    language_key = _normalize_language(language)
+    language_label = _language_display(language_key)
+    system_prompt = (
+        "You create practical coding exercises for learners. Return strict JSON only with key tasks. "
+        "Each task must contain task_name, description, starter_code. "
+        "The starter_code should be a runnable starting scaffold with TODO comments and no full solution. "
+        "Keep the tasks short, useful, and language-specific. No markdown."
+    )
+    user_prompt = (
+        f"Language: {language_label}\n"
+        f"Topic: {(topic or 'the current concept').strip()}\n"
+        f"Number of tasks: {count}\n\n"
+        "Return JSON object:\n"
+        "{\n"
+        "  \"tasks\": [\n"
+        "    {\n"
+        "      \"task_name\": \"...\",\n"
+        "      \"description\": \"...\",\n"
+        "      \"starter_code\": \"...\"\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "Rules:\n"
+        f"- Every task must be written for {language_label}\n"
+        "- Make each description ask the learner to complete the logic themselves\n"
+        "- starter_code must include a clear TODO and an input/output scaffold\n"
+        "- Avoid full solutions\n"
+    )
+    payload = chatgpt_json(system_prompt, user_prompt, temperature=0.45)
+    if not payload or not isinstance(payload.get("tasks"), list):
+        return [], "unavailable"
+    tasks = _validate_tasks(payload["tasks"], language_key)
+    return tasks[: max(1, min(5, count))], "ai"
 
 
 def _is_low_signal_topic(topic: str) -> bool:
@@ -1024,42 +1102,25 @@ def _merge_with_defaults(tasks: list[dict], count: int) -> list[dict]:
     return merged
 
 
-def generate_practice_tasks_from_topic(topic: str, count: int = 3, allow_ai: bool = True) -> tuple[list[dict], str]:
+def generate_practice_tasks_from_topic(
+    topic: str,
+    language: str | None = None,
+    count: int = 3,
+    allow_ai: bool = True,
+) -> tuple[list[dict], str]:
     clean_topic = (topic or "").strip()
+    language_key = _normalize_language(language)
     safe_count = max(1, min(5, int(count)))
-    bank_tasks = _topic_tasks_from_bank(clean_topic, safe_count)
-    if bank_tasks:
-        return bank_tasks, "catalog"
-    if not clean_topic or _is_low_signal_topic(clean_topic):
-        return DEFAULT_TASKS[:safe_count], "default"
-    if not allow_ai:
-        return DEFAULT_TASKS[:safe_count], "default"
 
-    system_prompt = (
-        "You are a Java tutor creating practical exception-handling practice tasks. "
-        "Return strict JSON only."
-    )
-    user_prompt = (
-        f"Generate {safe_count} Java coding tasks for this topic: {clean_topic}.\n"
-        "Output JSON object:\n"
-        "{\n"
-        "  \"tasks\": [\n"
-        "    {\n"
-        "      \"task_name\": \"...\",\n"
-        "      \"description\": \"...\",\n"
-        "      \"starter_code\": \"...\"\n"
-        "    }\n"
-        "  ]\n"
-        "}\n"
-        "Rules: starter_code must be valid Java with class Main and main method."
-    )
+    if allow_ai:
+        tasks, source = _generate_ai_practice_tasks(clean_topic or "the current concept", language_key, safe_count)
+        if tasks:
+            return tasks, source
 
-    payload = chatgpt_json(system_prompt, user_prompt, temperature=0.4)
-    if not payload or not isinstance(payload.get("tasks"), list):
+    if _allow_practice_fallback():
+        bank_tasks = _topic_tasks_from_bank(clean_topic, safe_count)
+        if bank_tasks:
+            return bank_tasks, "catalog"
         return DEFAULT_TASKS[:safe_count], "default"
 
-    tasks = _validate_tasks(payload["tasks"])
-    if len(tasks) < 1:
-        return DEFAULT_TASKS[:safe_count], "default"
-
-    return _merge_with_defaults(tasks, safe_count), "ai"
+    return [], "unavailable"

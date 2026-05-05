@@ -13,6 +13,7 @@ from app.models import (
     Download,
     ChatFeedback,
     ModerationItem,
+    UserProfile,
 )
 from app.services.chatbot_service import generate_chat_response, get_quick_prompts
 from app.services.download_service import create_download_file
@@ -150,6 +151,10 @@ def ask_chatbot():
     style_row = LearningStyle.query.get(user_id)
     if not style_row:
         return jsonify({"error": "learning style not found"}), 400
+    profile = db.session.get(UserProfile, user_id)
+    preferred_language = "python"
+    if profile and isinstance(profile.preferred_languages, list) and profile.preferred_languages:
+        preferred_language = str(profile.preferred_languages[0]).strip().lower() or "python"
 
     requested_style = str(payload.get("style_override", "")).strip().lower()
     effective_style = requested_style if requested_style in {"visual", "auditory", "kinesthetic"} else style_row.learning_style
@@ -174,7 +179,12 @@ def ask_chatbot():
     result = generate_chat_response(question, effective_style, mode, history_context)
     if result.get("error"):
         return jsonify(result), int(result.get("status") or 503)
-    practice_tasks, practice_source = generate_practice_tasks_from_topic(question, count=3, allow_ai=True)
+    practice_tasks, practice_source = generate_practice_tasks_from_topic(
+        question,
+        language=preferred_language,
+        count=3,
+        allow_ai=True,
+    )
     audio_download_id = None
     try:
         auto_resources = _auto_generate_resources(
@@ -218,9 +228,10 @@ def ask_chatbot():
     result["chat_id"] = history.chat_id
     if audio_download_id:
         result["audio_download_id"] = audio_download_id
-    if effective_style == "kinesthetic":
+    if practice_tasks:
         result["practice"] = {
             "topic": question,
+            "language": preferred_language,
             "source": practice_source,
             "tasks": practice_tasks,
         }

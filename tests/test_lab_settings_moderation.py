@@ -170,6 +170,59 @@ def test_code_lab_runs_python(tmp_path, monkeypatch):
     assert rows[0]["task_id"] == synced_task["task_id"]
 
 
+def test_practice_lab_supports_all_users_and_languages(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    token = _register(client, "practice@example.com", "Practice User")
+
+    from app.routes import practice as practice_routes
+
+    monkeypatch.setattr(
+        practice_routes,
+        "generate_practice_tasks_from_topic",
+        lambda topic, language, count=3, allow_ai=True: (
+            [
+                {
+                    "task_name": "Build a tiny echo tool",
+                    "description": f"Write a {language} program that reads input and prints it back.",
+                    "starter_code": (
+                        "import sys\n"
+                        "data = sys.stdin.read().strip()\n"
+                        "print(data)\n"
+                    ),
+                }
+            ],
+            "ai",
+        ),
+    )
+
+    tasks = client.get(
+        "/api/practice/tasks?topic=echo+input&language=python",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert tasks.status_code == 200
+    data = tasks.get_json()
+    assert data["tasks"]
+    assert data["language"] == "python"
+    assert data["source"] == "ai"
+
+    run = client.post(
+        "/api/practice/run",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "language": "python",
+            "source_code": (
+                "import sys\n"
+                "text = sys.stdin.read().strip()\n"
+                "print(text.upper())\n"
+            ),
+            "stdin": "vakify",
+        },
+    )
+    assert run.status_code == 200
+    run_data = run.get_json()
+    assert run_data["stdout"].strip() == "VAKIFY"
+
+
 def test_moderation_queue_is_accessible_to_admin(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch, admin=True)
     token = _register(client, "admin@example.com", "Admin User")
