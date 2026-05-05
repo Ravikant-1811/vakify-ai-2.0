@@ -288,11 +288,9 @@ def generate_chat_image():
     if not image_url:
         return jsonify({"error": "Image generation is temporarily unavailable"}), 503
 
-    title = str(payload.get("title") or "Generated Image").strip() or "Generated Image"
+    image_title = str(payload.get("title") or "Generated Image").strip() or "Generated Image"
     response_payload = {
-        "title": title,
-        "summary": f"Generated an image for: {prompt[:180]}",
-        "answer": "Image generated successfully. Use the preview below or open the attachment.",
+        "title": image_title,
         "image_url": image_url,
         "image_prompt": prompt,
         "confidence": "High",
@@ -308,15 +306,20 @@ def generate_chat_image():
 
     try:
         if source_row is not None:
-            source_row.response_type = "visual"
-            source_row.learning_style_used = "visual"
             _update_chat_history_response(source_row, **response_payload)
             history = source_row
         else:
             history = ChatHistory(
                 user_id=user_id,
                 question=prompt,
-                response=json.dumps(response_payload, ensure_ascii=False),
+                response=json.dumps(
+                    {
+                        **response_payload,
+                        "summary": f"Generated an image for: {prompt[:180]}",
+                        "answer": "Image generated successfully. Use the preview below or open the attachment.",
+                    },
+                    ensure_ascii=False,
+                ),
                 response_type="visual",
                 learning_style_used="visual",
             )
@@ -339,6 +342,8 @@ def generate_chat_image():
     response_payload["chat_id"] = history.chat_id
     response_payload["thread_id"] = thread.thread_id
     response_payload["thread_title"] = thread.title
+    if source_row is not None:
+        response_payload["summary"] = f"Generated an image for: {prompt[:180]}"
     return jsonify(response_payload)
 
 

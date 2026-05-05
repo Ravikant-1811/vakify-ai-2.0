@@ -137,6 +137,24 @@ def test_chat_image_generation_and_history(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
 
     import app.routes.chat as chat_routes
+    from app.services import chatbot_service
+
+    monkeypatch.setattr(chatbot_service, "chatgpt_text", lambda *args, **kwargs: "AI explanation for the topic.")
+    monkeypatch.setattr(
+        chatbot_service,
+        "openai_json_schema",
+        lambda *args, **kwargs: {
+            "title": "Binary Tree Overview",
+            "summary": "A clear explanation of binary trees.",
+            "answer": "A binary tree is a tree where each node has at most two children.",
+            "key_points": ["Root node", "Left subtree", "Right subtree"],
+            "image_prompt": "Clean educational infographic of a binary tree with labeled root, left child, and right child nodes.",
+            "follow_up_prompts": ["Show me a traversal example", "Explain leaf nodes"],
+            "confidence": "High",
+            "mode": "detailed",
+            "style": "visual",
+        },
+    )
 
     monkeypatch.setattr(chat_routes, "generate_image_data_url", lambda *args, **kwargs: "https://example.com/generated.png")
 
@@ -165,20 +183,32 @@ def test_chat_image_generation_and_history(tmp_path, monkeypatch):
     assert thread.status_code == 201
     thread_id = thread.get_json()["thread_id"]
 
+    chat_response = client.post(
+        "/api/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "question": "Explain a binary tree",
+            "mode": "detailed",
+            "thread_id": thread_id,
+        },
+    )
+    assert chat_response.status_code == 200
+    chat_id = chat_response.get_json()["chat_id"]
+
     response = client.post(
         "/api/chat/image",
         headers={"Authorization": f"Bearer {token}"},
         json={
-            "prompt": "Create a simple diagram of a binary tree",
+            "chat_id": chat_id,
             "thread_id": thread_id,
         },
     )
     assert response.status_code == 200
     data = response.get_json()
     assert data["image_url"] == "https://example.com/generated.png"
-    assert data["response_type"] == "visual"
+    assert data["image_prompt"] == "Clean educational infographic of a binary tree with labeled root, left child, and right child nodes."
     assert data["thread_id"] == thread_id
-    assert data["chat_id"]
+    assert data["chat_id"] == chat_id
 
     history = client.get(
         f"/api/chat/history?thread_id={thread_id}",
@@ -187,8 +217,9 @@ def test_chat_image_generation_and_history(tmp_path, monkeypatch):
     assert history.status_code == 200
     rows = history.get_json()
     assert len(rows) == 1
+    assert rows[0]["response_json"]["answer"] == "A binary tree is a tree where each node has at most two children."
     assert rows[0]["response_json"]["image_url"] == "https://example.com/generated.png"
-    assert rows[0]["response_json"]["mode"] == "image"
+    assert rows[0]["response_json"]["image_prompt"] == "Clean educational infographic of a binary tree with labeled root, left child, and right child nodes."
 
 
 def test_chat_audio_generation_and_history(tmp_path, monkeypatch):

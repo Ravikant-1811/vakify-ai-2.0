@@ -794,6 +794,7 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
   const hasPractice = Boolean(structured.practice?.trim());
   const hasQuiz = Boolean(structured.quiz_question?.trim() || quizOptions.length);
   const hasNextStep = Boolean(structured.next_step?.trim());
+  const hasImagePrompt = Boolean(structured.image_prompt?.trim());
   const hasImage = Boolean(structured.image_url?.trim());
 
   return (
@@ -828,6 +829,26 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
           {renderRichContent(structured.answer || message.content)}
         </div>
       </div>
+
+      {hasImagePrompt ? (
+        <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Image Prompt</div>
+              <div className="text-sm text-muted-foreground">Stored in the database and used for image generation.</div>
+            </div>
+            <button
+              onClick={() => void navigator.clipboard.writeText(structured.image_prompt || '')}
+              className="rounded-full border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            >
+              Copy prompt
+            </button>
+          </div>
+          <div className="mt-3 rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 py-3 text-sm leading-7 text-foreground/90">
+            {structured.image_prompt}
+          </div>
+        </div>
+      ) : null}
 
       {hasImage ? (
         <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
