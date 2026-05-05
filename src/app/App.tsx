@@ -1,3 +1,4 @@
+import { Component, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Landing } from './components/Landing';
@@ -15,6 +16,40 @@ import { Insights } from './components/Insights';
 import { AdminConsole } from './components/AdminConsole';
 import { Moderation } from './components/Moderation';
 import { Settings } from './components/Settings';
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background px-4">
+          <div className="max-w-lg rounded-3xl border border-border bg-card p-8 text-center shadow-sm">
+            <div className="text-xl font-semibold text-foreground">Vakify needs a quick refresh</div>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              A screen rendering issue was caught before the page could finish loading. Your data is still safe.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-6 inline-flex items-center justify-center rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              Reload page
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, ready } = useAuth();
@@ -139,7 +174,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <AppErrorBoundary>
+          <AppRoutes />
+        </AppErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
   );
