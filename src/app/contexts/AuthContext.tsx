@@ -14,6 +14,7 @@ export interface User {
   streak: number;
   accuracy: number;
   learningLevel?: string;
+  learningStyle?: 'visual' | 'auditory' | 'kinesthetic';
   preferredLanguage?: string;
   visualWeight?: number;
   auditoryWeight?: number;
@@ -224,6 +225,7 @@ function mapUser(data: Record<string, any>): User {
     streak: Number(data.streak ?? 0),
     accuracy: Number(data.accuracy ?? 0),
     learningLevel: data.learningLevel ?? data.learning_level ?? undefined,
+    learningStyle: data.learningStyle ?? data.learning_style ?? undefined,
     preferredLanguage: data.preferredLanguage ?? data.preferred_language ?? undefined,
     visualWeight: data.visualWeight ?? data.visual_weight ?? undefined,
     auditoryWeight: data.auditoryWeight ?? data.auditory_weight ?? undefined,

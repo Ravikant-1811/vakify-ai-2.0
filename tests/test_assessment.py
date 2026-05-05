@@ -35,7 +35,7 @@ def test_assessment_questions_and_submission(tmp_path, monkeypatch):
     public_questions = client.get("/api/assessment/questions")
     assert public_questions.status_code == 200
     public_questions_data = public_questions.get_json()
-    assert len(public_questions_data["questions"]) == 10
+    assert len(public_questions_data["questions"]) == 20
 
     questions = client.get(
         "/api/assessment/questions",
@@ -43,7 +43,7 @@ def test_assessment_questions_and_submission(tmp_path, monkeypatch):
     )
     assert questions.status_code == 200
     questions_data = questions.get_json()
-    assert len(questions_data["questions"]) == 10
+    assert len(questions_data["questions"]) == 20
     assert questions_data["saved"] is False
 
     answers = {question["id"]: 0 for question in questions_data["questions"]}
@@ -57,7 +57,7 @@ def test_assessment_questions_and_submission(tmp_path, monkeypatch):
     assert submit.status_code == 200
     submit_data = submit.get_json()
     assert submit_data["assessment"]["learning_style"] == "visual"
-    assert submit_data["assessment"]["visual_score"] == 10
+    assert submit_data["assessment"]["visual_score"] == 20
     assert submit_data["assessment"]["auditory_score"] == 0
     assert submit_data["assessment"]["kinesthetic_score"] == 0
 

@@ -193,7 +193,7 @@ def _build_questions(language: str) -> list[QuestionTemplate]:
 
 def _style_questions() -> list[dict]:
     questions = []
-    for idx, item in enumerate(STYLE_QUESTIONS[:10], start=1):
+    for idx, item in enumerate(STYLE_QUESTIONS[:20], start=1):
         questions.append(
             {
                 "id": f"style-q{idx}",
@@ -207,12 +207,12 @@ def _style_questions() -> list[dict]:
 
 def get_assessment_questions(language: str | None = None) -> list[dict]:
     del language
-    return _style_questions()
+    return _style_questions()[:20]
 
 
 def score_assessment(language: str | None, answers: dict) -> dict:
     del language
-    questions = STYLE_QUESTIONS[:10]
+    questions = STYLE_QUESTIONS[:20]
     answer_map = {str(key): value for key, value in (answers or {}).items()}
 
     style_counts: Counter[str] = Counter()

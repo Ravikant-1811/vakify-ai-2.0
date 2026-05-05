@@ -259,6 +259,28 @@ export function Dashboard() {
         </div>
       </div>
 
+      <div className="mb-8 rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Vakify assessment</div>
+            <h2 className="mt-2 text-xl font-semibold">
+              {user?.learningStyle ? `Your learning style: ${user.learningStyle}` : 'Take your learning style test'}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground max-w-2xl">
+              This 20-question test helps Vakify adapt explanations, tasks, and recommendations to your visual, auditory, or kinesthetic preference.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/assessment"
+              className="inline-flex items-center justify-center rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              {user?.learningStyle ? 'Retake assessment' : 'Start assessment'}
+            </Link>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-card border border-border rounded-xl p-6 shadow-sm">

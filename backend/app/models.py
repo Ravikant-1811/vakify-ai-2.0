@@ -273,7 +273,7 @@ class OnboardingAssessment(db.Model):
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), primary_key=True)
     preferred_language = db.Column(db.String(20), nullable=False)
-    total_questions = db.Column(db.Integer, default=10, nullable=False)
+    total_questions = db.Column(db.Integer, default=20, nullable=False)
     correct_answers = db.Column(db.Integer, default=0, nullable=False)
     percentage = db.Column(db.Float, default=0.0, nullable=False)
     recommended_level = db.Column(db.String(20), default="beginner", nullable=False)

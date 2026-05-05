@@ -5,6 +5,7 @@ import { Landing } from './components/Landing';
 import { Login } from './components/Login';
 import { GoogleCallback } from './components/GoogleCallback';
 import { Onboarding } from './components/Onboarding';
+import { AssessmentPage } from './components/AssessmentPage';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { AIChat } from './components/AIChat';
@@ -153,6 +154,7 @@ function AppRoutes() {
           ? <Onboarding />
           : <Navigate to={user?.role === 'admin' ? '/admin' : '/dashboard'} replace />
       } />
+      <Route path="/assessment" element={<LearnerRoute><AssessmentPage /></LearnerRoute>} />
 
       <Route path="/dashboard" element={<LearnerRoute><Dashboard /></LearnerRoute>} />
       <Route path="/chat" element={<LearnerRoute><AIChat /></LearnerRoute>} />

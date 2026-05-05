@@ -1,35 +1,13 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ChevronRight, BookOpen, Brain, CheckCircle2, Code2, FileText, Loader2, Mail, Phone, Sparkles } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { ChevronRight, BookOpen, CheckCircle2, Code2, FileText, Mail, Phone } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { apiFetch } from '../lib/api';
-
-type AssessmentQuestion = {
-  id: string;
-  prompt: string;
-  options: string[];
-  topic: string;
-};
-
-type AssessmentResult = {
-  learning_style: 'visual' | 'auditory' | 'kinesthetic';
-  visual_score: number;
-  auditory_score: number;
-  kinesthetic_score: number;
-  total: number;
-  percentage: number;
-  weak_topics: string[];
-};
+import { AssessmentWizard } from './AssessmentWizard';
 
 const LANGUAGE_CHOICES = ['Python', 'JavaScript', 'Java', 'C++', 'C'];
 
 export function Onboarding() {
   const { user, completeOnboarding } = useAuth();
   const [step, setStep] = useState(1);
-  const [assessmentQuestions, setAssessmentQuestions] = useState<AssessmentQuestion[]>([]);
-  const [assessmentAnswers, setAssessmentAnswers] = useState<Record<string, number>>({});
-  const [assessmentResult, setAssessmentResult] = useState<AssessmentResult | null>(null);
-  const [assessmentLoading, setAssessmentLoading] = useState(false);
-  const [assessmentError, setAssessmentError] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState(user?.preferredLanguage || '');
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [email, setEmail] = useState(user?.email || '');
@@ -38,92 +16,14 @@ export function Onboarding() {
   const [finishing, setFinishing] = useState(false);
 
   const totalSteps = 3;
-
-  useEffect(() => {
-    if (user?.displayName) {
-      setDisplayName(user.displayName);
-    }
-    if (user?.email) {
-      setEmail(user.email);
-    }
-    if (user?.preferredLanguage) {
-      setSelectedLanguage(user.preferredLanguage);
-    }
-  }, [user?.displayName, user?.email, user?.preferredLanguage]);
-
-  useEffect(() => {
-    const loadAssessment = async () => {
-      if (step !== 1 || assessmentQuestions.length) {
-        return;
-      }
-
-      setAssessmentLoading(true);
-      setAssessmentError('');
-      try {
-        const response = await apiFetch<{ questions: AssessmentQuestion[] }>('/api/assessment/questions');
-        setAssessmentQuestions(response.questions || []);
-        setAssessmentAnswers((current) => {
-          const next = { ...current };
-          for (const question of response.questions || []) {
-            if (!(question.id in next)) {
-              next[question.id] = -1;
-            }
-          }
-          return next;
-        });
-      } catch (err) {
-        setAssessmentError(err instanceof Error ? err.message : 'Unable to load assessment questions.');
-      } finally {
-        setAssessmentLoading(false);
-      }
-    };
-
-    void loadAssessment();
-  }, [assessmentQuestions.length, step]);
-
-  useEffect(() => {
-    if (assessmentResult && step === 2) {
-      setDisplayName((current) => current || user?.displayName || '');
-    }
-  }, [assessmentResult, step, user?.displayName]);
-
-  const answeredCount = useMemo(
-    () => Object.values(assessmentAnswers).filter((value) => value !== -1 && value !== undefined).length,
-    [assessmentAnswers],
-  );
-
-  const dominantStyle = assessmentResult?.learning_style || 'visual';
+  const currentLearningStyle = user?.learningStyle || 'visual';
 
   const canFinish = Boolean(
     displayName.trim() &&
       email.trim() &&
       selectedLanguage &&
-      assessmentResult &&
       !finishing,
   );
-
-  const submitAssessment = async () => {
-    if (answeredCount < assessmentQuestions.length || assessmentLoading) {
-      return;
-    }
-
-    setAssessmentLoading(true);
-    setAssessmentError('');
-    try {
-      const response = await apiFetch<{ assessment: AssessmentResult }>('/api/assessment/submit', {
-        method: 'POST',
-        body: JSON.stringify({
-          answers: assessmentAnswers,
-        }),
-      });
-      setAssessmentResult(response.assessment);
-      setStep(2);
-    } catch (err) {
-      setAssessmentError(err instanceof Error ? err.message : 'Unable to save assessment.');
-    } finally {
-      setAssessmentLoading(false);
-    }
-  };
 
   const finishOnboarding = async () => {
     if (!canFinish) {
@@ -178,77 +78,17 @@ export function Onboarding() {
 
         <div className="bg-card border border-border rounded-xl p-5 sm:p-8 shadow-sm">
           {step === 1 && (
-            <div>
-              {renderStepHeader(
-                'Vakify assessment: 10 quick questions',
-                'This identifies your learning style so the rest of Vakify can adapt to you.',
-                <Brain className="w-6 h-6 text-secondary" />,
-              )}
-
-              {assessmentLoading && (
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading your assessment...
-                </div>
-              )}
-
-              {assessmentError && (
-                <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                  {assessmentError}
-                </div>
-              )}
-
-              {!assessmentLoading && assessmentQuestions.length > 0 && (
-                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Sparkles className="w-4 h-4 text-secondary" />
-                    <span className="text-sm text-muted-foreground">
-                      {answeredCount}/{assessmentQuestions.length} answered
-                    </span>
-                  </div>
-                  {assessmentQuestions.map((question, index) => (
-                    <div key={question.id} className="rounded-2xl border border-border bg-muted/20 p-4 sm:p-5">
-                      <div className="mb-3 flex items-start justify-between gap-4">
-                        <div>
-                          <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground">
-                            Question {index + 1}
-                          </div>
-                          <h3 className="mt-2 text-base sm:text-lg">{question.prompt}</h3>
-                        </div>
-                        <span className="rounded-full bg-secondary/10 px-3 py-1 text-xs font-medium text-secondary">
-                          {question.topic}
-                        </span>
-                      </div>
-
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {question.options.map((option, optionIndex) => {
-                          const selected = assessmentAnswers[question.id] === optionIndex;
-                          return (
-                            <button
-                              key={option}
-                              type="button"
-                              onClick={() =>
-                                setAssessmentAnswers((current) => ({
-                                  ...current,
-                                  [question.id]: optionIndex,
-                                }))
-                              }
-                              className={`rounded-xl border px-4 py-3 text-left text-sm transition-all ${
-                                selected
-                                  ? 'border-secondary bg-secondary/5 text-foreground'
-                                  : 'border-border bg-background hover:border-secondary/50'
-                              }`}
-                            >
-                              {option}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <AssessmentWizard
+              title="Vakify assessment"
+              description="Take the 20-question style assessment now, or skip it and come back later from your dashboard."
+              showSkip
+              skipLabel="Skip for now"
+              continueLabel="Continue to Language"
+              onCompleted={async () => {
+                setStep(2);
+              }}
+              onSkip={() => setStep(2)}
+            />
           )}
 
           {step === 2 && (
@@ -259,18 +99,22 @@ export function Onboarding() {
                 <Code2 className="w-6 h-6 text-secondary" />,
               )}
 
-              {assessmentResult && (
-                <div className="rounded-2xl border border-secondary/20 bg-secondary/5 p-5">
-                  <div className="flex items-center gap-2 text-secondary">
-                    <CheckCircle2 className="h-5 w-5" />
-                    <span className="font-medium">Assessment saved</span>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Your strongest learning mode is{' '}
-                    <span className="font-medium text-foreground capitalize">{dominantStyle}</span>. We’ll use this to shape the interface and prompts.
-                  </p>
+              <div className="rounded-2xl border border-secondary/20 bg-secondary/5 p-5">
+                <div className="flex items-center gap-2 text-secondary">
+                  <CheckCircle2 className="h-5 w-5" />
+                  <span className="font-medium">Learning style ready</span>
                 </div>
-              )}
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {user?.learningStyle
+                    ? (
+                      <>
+                        Your current learning style is{' '}
+                        <span className="font-medium text-foreground capitalize">{currentLearningStyle}</span>. You can retake the assessment later from the dashboard.
+                      </>
+                    )
+                    : 'You can skip the assessment now and take it later from the dashboard when you are ready.'}
+                </p>
+              </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {LANGUAGE_CHOICES.map((lang) => {
@@ -375,7 +219,7 @@ export function Onboarding() {
                   <div className="space-y-3 text-sm">
                     <div className="rounded-xl border border-border bg-background px-4 py-3">
                       <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Learning style</div>
-                      <div className="mt-1 text-base capitalize">{dominantStyle}</div>
+                      <div className="mt-1 text-base capitalize">{currentLearningStyle}</div>
                     </div>
                     <div className="rounded-xl border border-border bg-background px-4 py-3">
                       <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Programming language</div>
@@ -408,12 +252,9 @@ export function Onboarding() {
                 Back
               </button>
             )}
+            {step === 1 ? null : (
             <button
               onClick={async () => {
-                if (step === 1) {
-                  await submitAssessment();
-                  return;
-                }
                 if (step === 2) {
                   if (selectedLanguage) {
                     setStep(3);
@@ -429,11 +270,11 @@ export function Onboarding() {
               }
               className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {step === 1 && (assessmentLoading ? 'Saving Assessment...' : 'Continue to Language')}
               {step === 2 && 'Continue to Profile'}
               {step === 3 && (finishing ? 'Finishing...' : 'Get Started')}
               <ChevronRight className="w-5 h-5" />
             </button>
+            )}
           </div>
         </div>
       </div>

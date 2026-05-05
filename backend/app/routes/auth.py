@@ -96,6 +96,7 @@ def _progress_summary(user_id: int) -> dict:
         onboarded = True
 
     preferred_language = None
+    learning_style = None
     weak_topics = []
     learning_level = "beginner"
     phone_number = None
@@ -111,6 +112,8 @@ def _progress_summary(user_id: int) -> dict:
             weak_topics = [str(item) for item in raw_topics if str(item).strip()][:12]
         phone_number = profile.phone_number
         other_details = profile.other_details_json
+    if style:
+        learning_style = style.learning_style
 
     return {
         "xp": wallet.current_xp,
@@ -120,6 +123,7 @@ def _progress_summary(user_id: int) -> dict:
         "accuracy": accuracy,
         "onboarded": onboarded,
         "learningLevel": learning_level.capitalize() if learning_level else "Beginner",
+        "learningStyle": learning_style,
         "preferredLanguage": preferred_language,
         "weakTopics": weak_topics,
         "phoneNumber": phone_number,
@@ -140,6 +144,7 @@ def _serialize_user(user: User) -> dict:
         "streak": summary["streak"],
         "accuracy": summary["accuracy"],
         "learningLevel": summary["learningLevel"],
+        "learningStyle": summary["learningStyle"],
         "preferredLanguage": summary["preferredLanguage"],
         "weakTopics": summary["weakTopics"],
         "phoneNumber": summary["phoneNumber"],
