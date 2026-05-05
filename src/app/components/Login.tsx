@@ -118,21 +118,21 @@ export function Login() {
         </div>
       </div>
 
-      <div className="flex-1 bg-white flex items-center justify-center px-4 py-6 sm:px-6 sm:py-8 lg:p-8">
-        <div className="w-full max-w-md lg:max-w-md">
-          <div className="lg:hidden mb-6 rounded-3xl bg-gradient-to-br from-[#1E3A5F] via-[#2a4a6f] to-[#1B998B] text-white p-5 shadow-lg">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-white/80">
+      <div className="flex-1 bg-white flex items-center justify-center px-3 py-4 sm:px-6 sm:py-8 lg:p-8">
+        <div className="w-full max-w-sm sm:max-w-md lg:max-w-md">
+          <div className="lg:hidden mb-4 rounded-3xl bg-gradient-to-br from-[#1E3A5F] via-[#2a4a6f] to-[#1B998B] text-white p-4 sm:p-5 shadow-lg">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-white/80">
               <Sparkles className="w-4 h-4 text-[#F4A261]" />
               Vakify 2.0
             </div>
-            <h1 className="mt-3 text-3xl font-bold tracking-tight">Your adaptive learning OS</h1>
-            <p className="mt-2 text-sm text-white/85">
+            <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight leading-tight">Your adaptive learning OS</h1>
+            <p className="mt-2 text-sm leading-6 text-white/85">
               Learn, chat, practice, and track progress in one place.
             </p>
           </div>
 
-          <div className="mb-6 sm:mb-8">
-            <h2 className="text-2xl sm:text-3xl mb-2">
+          <div className="mb-5 sm:mb-8">
+            <h2 className="text-2xl sm:text-3xl mb-2 leading-tight">
               {isSignup ? 'Create Account' : 'Welcome Back'}
             </h2>
             <p className="text-sm sm:text-base text-muted-foreground">
@@ -140,7 +140,7 @@ export function Login() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3.5 sm:space-y-4">
             {isSignup && (
               <div>
                 <label className="block text-sm mb-2">Full Name</label>
@@ -225,12 +225,12 @@ export function Login() {
               </button>
             )}
 
-            <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+            <div className="hidden sm:block rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
               Use Google for one-click sign in, or create a local account with your email and password.
             </div>
           </form>
 
-          <div className="mt-6 text-center">
+          <div className="mt-5 sm:mt-6 text-center">
             <button
               onClick={() => setIsSignup(!isSignup)}
               className="text-secondary hover:underline"
@@ -240,7 +240,7 @@ export function Login() {
           </div>
 
           {!isSignup && (
-            <div className="mt-6 sm:mt-8 p-4 bg-muted/50 rounded-xl">
+            <div className="mt-5 sm:mt-8 p-3.5 sm:p-4 bg-muted/50 rounded-xl">
               <p className="text-sm text-muted-foreground mb-2">Sign in</p>
               <p className="text-xs text-muted-foreground">Use your own account to continue your learning progress.</p>
             </div>

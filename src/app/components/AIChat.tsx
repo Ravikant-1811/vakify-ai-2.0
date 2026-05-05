@@ -541,35 +541,44 @@ export function AIChat() {
               <span className="text-xs text-muted-foreground">{threads.length} threads</span>
             </div>
             <div className="space-y-2 overflow-y-auto pr-1">
-                {threads.length ? (
-                  threads.map((thread) => (
-                    <button
+              {threads.length ? (
+                threads.map((thread) => {
+                  const isActive = activeThreadId === thread.thread_id;
+                  return (
+                    <div
                       key={thread.thread_id}
-                      onClick={() => void selectThread(thread.thread_id)}
-                    className={`w-full text-left rounded-2xl border px-4 py-3 transition-all ${
-                      activeThreadId === thread.thread_id
-                        ? 'border-primary bg-primary text-primary-foreground shadow-md shadow-primary/10'
-                        : 'border-border bg-background hover:border-secondary/50 hover:shadow-sm'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold truncate">{thread.title}</div>
-                        <div className={`mt-1 text-xs ${activeThreadId === thread.thread_id ? 'text-primary-foreground/75' : 'text-muted-foreground'}`}>
-                          {thread.preview || `${thread.message_count} saved message${thread.message_count === 1 ? '' : 's'}`}
+                      className={`rounded-2xl border px-4 py-3 transition-all ${
+                        isActive
+                          ? 'border-primary bg-primary text-primary-foreground shadow-md shadow-primary/10'
+                          : 'border-border bg-background hover:border-secondary/50 hover:shadow-sm'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => void selectThread(thread.thread_id)}
+                        className="w-full text-left"
+                        aria-label={`Open ${thread.title}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold truncate">{thread.title}</div>
+                            <div className={`mt-1 text-xs ${isActive ? 'text-primary-foreground/75' : 'text-muted-foreground'}`}>
+                              {thread.preview || `${thread.message_count} saved message${thread.message_count === 1 ? '' : 's'}`}
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <div className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isActive ? 'bg-white/15' : 'bg-muted text-muted-foreground'}`}>
+                              {thread.message_count}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <div className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${activeThreadId === thread.thread_id ? 'bg-white/15' : 'bg-muted text-muted-foreground'}`}>
-                          {thread.message_count}
-                        </div>
+                      </button>
+                      <div className="mt-3 flex justify-end">
                         <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void deleteThread(thread.thread_id, activeThreadId === thread.thread_id);
-                          }}
+                          type="button"
+                          onClick={() => void deleteThread(thread.thread_id, isActive)}
                           className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
-                            activeThreadId === thread.thread_id
+                            isActive
                               ? 'bg-white/15 text-primary-foreground hover:bg-white/25'
                               : 'bg-muted text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
                           }`}
@@ -580,8 +589,8 @@ export function AIChat() {
                         </button>
                       </div>
                     </div>
-                  </button>
-                ))
+                  );
+                })
               ) : (
                 <div className="rounded-2xl border border-dashed border-border bg-background/60 p-4 text-sm text-muted-foreground">
                   No saved chats yet. Start a new thread to save history.
