@@ -1,4 +1,6 @@
 from app import create_app
+from app.extensions import db
+from app.models import CodeLabTask, LabWorkspaceState
 
 
 def _client(tmp_path, monkeypatch):
@@ -383,3 +385,108 @@ def test_chat_thread_delete_removes_history(tmp_path, monkeypatch):
     )
     assert threads.status_code == 200
     assert threads.get_json()["threads"] == []
+
+
+def test_chat_thread_delete_removes_lab_dependencies(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    from app.services import chatbot_service
+
+    monkeypatch.setattr(chatbot_service, "chatgpt_text", lambda *args, **kwargs: "AI explanation for the topic.")
+    monkeypatch.setattr(
+        chatbot_service,
+        "openai_json_schema",
+        lambda *args, **kwargs: {
+            "title": "Data Structures",
+            "summary": "A structured explanation of data structures.",
+            "answer": "Data structures organize data efficiently.",
+            "key_points": ["Arrays", "Stacks"],
+            "example": "An array stores values in order.",
+            "code_sample": "print('hello')",
+            "practice": "Build a small example.",
+            "quiz_question": "What is an array?",
+            "quiz_options": ["A list-like structure", "A compiler", "A library", "A package"],
+            "follow_up_prompts": ["Give me a Python example"],
+            "next_step": "Try a coding exercise.",
+            "confidence": "High",
+            "mode": "detailed",
+            "style": "visual",
+        },
+    )
+
+    register = client.post(
+        "/api/auth/register",
+        json={
+            "email": "lab-delete@example.com",
+            "password": "secret123",
+            "display_name": "Lab Delete Learner",
+        },
+    )
+    register_data = register.get_json()
+    token = register_data["access_token"]
+    user_id = int(register_data["user"]["id"])
+
+    style = client.post(
+        "/api/style/select",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"learning_style": "visual"},
+    )
+    assert style.status_code == 200
+
+    thread = client.post(
+        "/api/chat/threads",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "Lab Sync Chat"},
+    )
+    assert thread.status_code == 201
+    thread_id = thread.get_json()["thread_id"]
+
+    response = client.post(
+        "/api/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "question": "Teach me arrays",
+            "mode": "detailed",
+            "thread_id": thread_id,
+        },
+    )
+    assert response.status_code == 200
+    chat_id = response.get_json()["chat_id"]
+
+    with client.application.app_context():
+        task = CodeLabTask(
+            user_id=user_id,
+            language="python",
+            task_key="test-task",
+            title="Test Task",
+            description="Test task",
+            starter_code="print('hi')",
+            source_chat_id=chat_id,
+            source_thread_id=thread_id,
+        )
+        workspace = LabWorkspaceState(
+            user_id=user_id,
+            workspace_type="chat",
+            language="python",
+            chat_id=chat_id,
+            thread_id=thread_id,
+            source_task_key="test-task",
+            code="print('hi')",
+            stdin="",
+            last_output="hi",
+            last_status="draft",
+        )
+        db.session.add(task)
+        db.session.add(workspace)
+        db.session.commit()
+
+    delete_response = client.delete(
+        f"/api/chat/threads/{thread_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert delete_response.status_code == 200
+
+    with client.application.app_context():
+        assert CodeLabTask.query.filter_by(source_chat_id=chat_id).count() == 0
+        assert CodeLabTask.query.filter_by(source_thread_id=thread_id).count() == 0
+        assert LabWorkspaceState.query.filter_by(chat_id=chat_id).count() == 0
+        assert LabWorkspaceState.query.filter_by(thread_id=thread_id).count() == 0

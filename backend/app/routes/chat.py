@@ -3,6 +3,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 from app.extensions import db
 from app.models import (
@@ -12,6 +13,8 @@ from app.models import (
     ChatThreadMessage,
     Download,
     ChatFeedback,
+    CodeLabTask,
+    LabWorkspaceState,
     ModerationItem,
     UserProfile,
 )
@@ -441,6 +444,20 @@ def delete_chat_thread(thread_id: int):
     try:
         linked_chat_ids = [row.chat_id for row in ChatThreadMessage.query.filter_by(thread_id=thread_id, user_id=user_id).all()]
         if linked_chat_ids:
+            CodeLabTask.query.filter(
+                CodeLabTask.user_id == user_id,
+                or_(
+                    CodeLabTask.source_chat_id.in_(linked_chat_ids),
+                    CodeLabTask.source_thread_id == thread_id,
+                ),
+            ).delete(synchronize_session=False)
+            LabWorkspaceState.query.filter(
+                LabWorkspaceState.user_id == user_id,
+                or_(
+                    LabWorkspaceState.chat_id.in_(linked_chat_ids),
+                    LabWorkspaceState.thread_id == thread_id,
+                ),
+            ).delete(synchronize_session=False)
             ChatFeedback.query.filter(
                 ChatFeedback.user_id == user_id,
                 ChatFeedback.chat_id.in_(linked_chat_ids),
