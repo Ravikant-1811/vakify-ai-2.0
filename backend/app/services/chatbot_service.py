@@ -261,6 +261,35 @@ def _generate_prompt_suggestions(topic: str, style: str) -> list[str]:
     return fallback[:6]
 
 
+def _image_prompt_from_chat(question: str, answer: str, style: str, title: str | None = None) -> str:
+    base_topic = _safe_label(question or answer or title or "this topic", 90)
+    style = (style or "visual").strip().lower()
+    style_hint = {
+        "visual": "clean infographic, clear labels, simple iconography, bright educational style",
+        "auditory": "speech-bubble style visual summary, soundwave accent, minimal infographic layout",
+        "kinesthetic": "step-by-step action diagram, hands-on workflow, task cards and arrows",
+    }.get(style, "clean educational infographic")
+    raw = chatgpt_text(
+        "You write concise image prompts for educational visuals. Return one line only.",
+        (
+            f"Topic: {base_topic}\n"
+            f"Style hint: {style_hint}\n"
+            f"Answer summary: {(answer or '')[:500]}\n"
+            f"Title: {title or ''}\n"
+            "Write a single Leonardo image prompt that is specific, visually clear, and suitable for a student learning platform."
+        ),
+        temperature=0.55,
+    )
+    if raw:
+        prompt = raw.strip().strip('"').strip("'")
+        if len(prompt) >= 20:
+            return _safe_label(prompt, 380)
+    return _safe_label(
+        f"Create a clean educational infographic for {base_topic}. Use {style_hint}. Focus on the main idea, keep labels short, and make the concept easy to study at a glance.",
+        380,
+    )
+
+
 def _svg_data_uri(svg: str) -> str:
     return f"data:image/svg+xml;utf8,{quote(svg, safe='')}"
 
@@ -508,6 +537,7 @@ CHAT_RESPONSE_SCHEMA = {
         "quiz_options": {"type": "array", "items": {"type": "string"}},
         "follow_up_prompts": {"type": "array", "items": {"type": "string"}},
         "next_step": {"type": "string"},
+        "image_prompt": {"type": "string"},
         "confidence": {"type": "string"},
         "mode": {"type": "string"},
         "style": {"type": "string"},
@@ -524,6 +554,7 @@ CHAT_RESPONSE_SCHEMA = {
         "quiz_options",
         "follow_up_prompts",
         "next_step",
+        "image_prompt",
         "confidence",
         "mode",
         "style",
@@ -625,6 +656,7 @@ def _fallback_chat_response(question: str, style: str, mode: str, recent_history
     if not key_points:
         key_points = ["Clarify the goal", "Break the problem into steps", "Test with edge cases"]
     code_sample = _code_sample_for_topic(question, style)
+    image_prompt = _image_prompt_from_chat(question, base, style, title)
     return {
         "title": title,
         "summary": f"A {mode} response for {question.strip() or 'your topic'} with a clear breakdown.",
@@ -637,6 +669,7 @@ def _fallback_chat_response(question: str, style: str, mode: str, recent_history
         "quiz_options": ["Identify the concept", "Ignore edge cases", "Skip testing", "Jump to the final answer"],
         "follow_up_prompts": _generate_prompt_suggestions(question, style)[:4],
         "next_step": "Try one quick example, then test an edge case.",
+        "image_prompt": image_prompt,
         "confidence": "High",
         "mode": mode,
         "style": style,
@@ -727,6 +760,9 @@ def generate_chat_response(
         follow_up_prompts = []
     follow_up_prompts_clean = [str(item).strip() for item in follow_up_prompts[:4] if str(item).strip()]
     next_step = str(structured.get("next_step") or "").strip()
+    image_prompt = str(structured.get("image_prompt") or "").strip()
+    if not image_prompt:
+        image_prompt = _image_prompt_from_chat(question, answer, style_key, str(structured.get("title") or "").strip())
     confidence = str(structured.get("confidence") or "High").strip().title()
     if confidence not in {"High", "Medium", "Low"}:
         confidence = "High"
@@ -748,6 +784,7 @@ def generate_chat_response(
         "quiz_question": quiz_question,
         "quiz_options": [str(item).strip() for item in quiz_options[:4] if str(item).strip()],
         "next_step": next_step,
+        "image_prompt": image_prompt,
         "confidence": confidence,
         "response_type": base.get("response_type", style_key),
         "ai_used": bool(base.get("ai_used")),

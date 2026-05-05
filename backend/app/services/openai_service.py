@@ -108,6 +108,28 @@ def _responses_output_text(data: dict[str, Any] | None) -> str | None:
     return text or None
 
 
+def _extract_leonardo_generation_id(payload: dict[str, Any]) -> str:
+    candidates = [
+        payload.get("generationId"),
+        payload.get("generation_id"),
+        payload.get("id"),
+    ]
+    nested = payload.get("sdGenerationJob") or payload.get("sd_generation_job") or {}
+    if isinstance(nested, dict):
+        candidates.extend(
+            [
+                nested.get("generationId"),
+                nested.get("generation_id"),
+                nested.get("id"),
+            ]
+        )
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _normalize_leonardo_model_id(raw_value: str) -> str:
     value = raw_value.strip()
     if not value:
@@ -343,12 +365,7 @@ def generate_image_data_url(prompt: str, size: str = "1024x1024") -> str | None:
             )
             response.raise_for_status()
             generation_payload = response.json() or {}
-            generation_id = str(
-                generation_payload.get("generationId")
-                or generation_payload.get("generation_id")
-                or generation_payload.get("id")
-                or ""
-            ).strip()
+            generation_id = _extract_leonardo_generation_id(generation_payload)
             if generation_id:
                 deadline = time.monotonic() + 45
                 while time.monotonic() < deadline:

@@ -89,6 +89,7 @@ def test_structured_chat_response_and_history(tmp_path, monkeypatch):
     assert rows[0]["response_json"]["answer"]
     assert rows[0]["response_json"]["summary"]
     assert rows[0]["response_json"]["key_points"]
+    assert rows[0]["response_json"]["image_prompt"]
     assert rows[0]["thread_id"] == thread_id
 
     second_thread = client.post(

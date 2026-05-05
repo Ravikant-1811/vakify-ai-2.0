@@ -266,7 +266,13 @@ def generate_chat_image():
         if not source_row:
             return jsonify({"error": "chat not found"}), 404
         source_payload = _safe_parse_response(source_row.response) or {}
-        prompt = prompt or str(source_payload.get("answer") or source_payload.get("summary") or source_row.question or "").strip()
+        prompt = prompt or str(
+            source_payload.get("image_prompt")
+            or source_payload.get("answer")
+            or source_payload.get("summary")
+            or source_row.question
+            or ""
+        ).strip()
         source_thread = ChatThreadMessage.query.filter_by(chat_id=source_row.chat_id, user_id=user_id).first()
         if source_thread and requested_thread_id is None:
             requested_thread_id = source_thread.thread_id
