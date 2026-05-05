@@ -317,7 +317,7 @@ export function AIChat() {
       const assistantMessage: Message = {
         id: `img-${Date.now()}`,
         role: 'assistant',
-        content: response.answer || 'Image generated successfully.',
+        content: response.summary || response.image_prompt || response.answer || 'Image generated successfully.',
         confidence: response.confidence || 'High',
         timestamp: new Date(),
         chatId: response.chat_id,
@@ -833,14 +833,12 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
         </div>
       </div>
 
-      {hasImage ? (
+          {hasImage ? (
         <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Image Result</div>
-              <div className="text-sm text-muted-foreground">
-                {structured.image_prompt ? `Prompt: ${structured.image_prompt}` : 'Generated visual response.'}
-              </div>
+              <div className="text-sm text-muted-foreground">{structured.summary || 'Generated visual response.'}</div>
             </div>
             <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
               Visual
@@ -859,12 +857,9 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
             </div>
           ) : null}
           {hasImagePrompt ? (
-            <details className="mt-4 rounded-2xl border border-dashed border-border/70 bg-muted/10 px-4 py-3">
-              <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.24em] text-muted-foreground">
-                Image prompt
-              </summary>
-              <div className="mt-3 flex items-start justify-between gap-3">
-                <p className="text-sm leading-7 text-foreground/90">{structured.image_prompt}</p>
+            <div className="mt-4 rounded-2xl border border-border/70 bg-muted/10 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">Image Prompt</div>
                 <button
                   onClick={() => void navigator.clipboard.writeText(structured.image_prompt || '')}
                   className="rounded-full border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors shrink-0"
@@ -872,7 +867,8 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
                   Copy
                 </button>
               </div>
-            </details>
+              <p className="mt-3 text-sm leading-7 text-foreground/90">{structured.image_prompt}</p>
+            </div>
           ) : null}
         </div>
       ) : null}

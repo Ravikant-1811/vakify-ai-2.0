@@ -294,6 +294,7 @@ def generate_chat_image():
         "image_url": image_url,
         "image_prompt": prompt,
         "attached_to_text": source_row is not None,
+        "summary": f"Generated an image for: {prompt[:180]}",
         "confidence": "High",
         "response_type": "visual",
         "mode": "image",
@@ -310,6 +311,7 @@ def generate_chat_image():
             _update_chat_history_response(source_row, **response_payload)
             history = source_row
         else:
+            response_payload["answer"] = "Image generated successfully. Use the preview below or open the attachment."
             history = ChatHistory(
                 user_id=user_id,
                 question=prompt,
