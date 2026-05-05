@@ -69,6 +69,9 @@ SECRET_KEY=your-secret-key
 JWT_SECRET_KEY=your-jwt-secret
 DATABASE_URL=sqlite:///adaptive_learning.db
 OPENAI_API_KEY=your-openai-key
+ELEVENLABS_API_KEY=your-elevenlabs-api-key
+ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2
 CORS_ORIGINS=*
 APP_ENV=development
 FLASK_DEBUG=0
@@ -84,6 +87,9 @@ SECRET_KEY=your-strong-secret
 JWT_SECRET_KEY=your-strong-jwt-secret
 DATABASE_URL=your-postgres-connection-string
 OPENAI_API_KEY=your-openai-key
+ELEVENLABS_API_KEY=your-elevenlabs-api-key
+ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_REDIRECT_URI=https://your-vercel-domain/auth/google/callback
@@ -160,7 +166,7 @@ npm run build
 - Use `render.yaml` from the repo root
 - It provisions a Python web service and a managed Postgres database
 - After Render creates the API URL, copy it into Vercel as `VITE_API_BASE_URL`
-- Add the Google and OpenAI secrets in the Render dashboard if you prefer not to sync them from the repo
+- Add the Google, OpenAI, and ElevenLabs secrets in the Render dashboard if you prefer not to sync them from the repo
 
 ## API Summary
 

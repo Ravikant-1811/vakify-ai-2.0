@@ -23,6 +23,10 @@ services:
         generateValue: true
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: ELEVENLABS_VOICE_ID
+        value: EXAVITQu4vr4xnSDxMaL
+      - key: ELEVENLABS_MODEL_ID
+        value: eleven_multilingual_v2
 
 databases:
   - name: vakify-db
