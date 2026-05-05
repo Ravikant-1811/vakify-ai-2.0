@@ -634,7 +634,7 @@ export function AIChat() {
                       </div>
                     </div>
 
-                    {renderStructuredAssistant(message, (prompt) => void handleSend(prompt))}
+                    {renderStructuredAssistant(message, (prompt) => void handleSend(prompt), message.chatId ? audioUrls[message.chatId] : null)}
 
                     <div className="flex items-center gap-3 pt-4 mt-5 border-t border-border/70 flex-wrap">
                       <button
@@ -780,7 +780,7 @@ function buildClipboardText(message: Message) {
   return lines.join('\n').trim();
 }
 
-function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: string) => void) {
+function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: string) => void, audioSrc?: string | null) {
   const structured = message.structured;
   if (!structured) {
     return <div className="space-y-4 text-sm leading-7 text-foreground/95">{renderRichContent(message.content)}</div>;
@@ -795,7 +795,6 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
   const hasQuiz = Boolean(structured.quiz_question?.trim() || quizOptions.length);
   const hasNextStep = Boolean(structured.next_step?.trim());
   const hasImage = Boolean(structured.image_url?.trim());
-  const audioSrc = (message.chatId && audioUrls[message.chatId]) || null;
 
   return (
     <div className="space-y-5 text-sm leading-7 text-foreground/95">
