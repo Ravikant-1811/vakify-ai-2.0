@@ -1,7 +1,7 @@
 const DEFAULT_API_BASE_URL = 'http://127.0.0.1:5001';
 const AUTH_TOKEN_KEY = 'vakify.access_token';
 
-function getApiBaseUrl() {
+export function getApiBaseUrl() {
   const raw = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
   return String(raw).replace(/\/$/, '');
 }

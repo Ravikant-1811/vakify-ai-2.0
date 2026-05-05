@@ -12,8 +12,9 @@ import {
   Trash2,
   PenLine,
   ImagePlus,
+  Volume2,
 } from 'lucide-react';
-import { apiFetch } from '../lib/api';
+import { apiFetch, getApiBaseUrl } from '../lib/api';
 
 type ConfidenceLevel = 'High' | 'Medium' | 'Low';
 
@@ -39,6 +40,8 @@ type ChatPayload = {
   thread_title?: string;
   image_url?: string;
   image_prompt?: string;
+  audio_download_id?: number;
+  audio_download_url?: string;
 };
 
 type ThreadSummary = {
@@ -69,6 +72,7 @@ export function AIChat() {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<number | null>(null);
   const [generatingImage, setGeneratingImage] = useState(false);
+  const [assetAction, setAssetAction] = useState<{ chatId: number; kind: 'image' | 'audio' } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -290,6 +294,55 @@ export function AIChat() {
       ]);
     } finally {
       setGeneratingImage(false);
+    }
+  };
+
+  const mergeStructuredMessage = (chatId: number, next: ChatPayload) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.chatId !== chatId || message.role !== 'assistant') {
+          return message;
+        }
+        const mergedStructured = {
+          ...(message.structured || {}),
+          ...next,
+        };
+        return {
+          ...message,
+          content: next.answer || next.text || message.content,
+          confidence: next.confidence || message.confidence,
+          followUps: next.follow_up_prompts?.slice(0, 4) || message.followUps,
+          structured: mergedStructured,
+        };
+      }),
+    );
+  };
+
+  const generateAssistantAudio = async (message: Message) => {
+    if (!message.chatId || assetAction) return;
+    setAssetAction({ chatId: message.chatId, kind: 'audio' });
+    try {
+      const response = await apiFetch<ChatPayload>('/api/chat/audio', {
+        method: 'POST',
+        body: JSON.stringify({ chat_id: message.chatId }),
+      });
+      mergeStructuredMessage(message.chatId, response);
+    } finally {
+      setAssetAction(null);
+    }
+  };
+
+  const generateAssistantImage = async (message: Message) => {
+    if (!message.chatId || assetAction) return;
+    setAssetAction({ chatId: message.chatId, kind: 'image' });
+    try {
+      const response = await apiFetch<ChatPayload>('/api/chat/image', {
+        method: 'POST',
+        body: JSON.stringify({ chat_id: message.chatId, thread_id: activeThreadId }),
+      });
+      mergeStructuredMessage(message.chatId, response);
+    } finally {
+      setAssetAction(null);
     }
   };
 
@@ -532,6 +585,22 @@ export function AIChat() {
                         {copiedId === message.id ? 'Copied' : 'Copy'}
                       </button>
                       <button
+                        onClick={() => void generateAssistantAudio(message)}
+                        disabled={assetAction?.chatId === message.chatId}
+                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                        {assetAction?.chatId === message.chatId && assetAction.kind === 'audio' ? 'Creating audio...' : 'Audio'}
+                      </button>
+                      <button
+                        onClick={() => void generateAssistantImage(message)}
+                        disabled={assetAction?.chatId === message.chatId}
+                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                      >
+                        <ImagePlus className="w-4 h-4" />
+                        {assetAction?.chatId === message.chatId && assetAction.kind === 'image' ? 'Creating image...' : 'Image'}
+                      </button>
+                      <button
                         onClick={() => void feedback(message, 1)}
                         className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -643,6 +712,7 @@ function buildClipboardText(message: Message) {
   if (structured.next_step) lines.push(`Next step:\n${structured.next_step}`, '');
   if (structured.image_prompt) lines.push(`Image prompt:\n${structured.image_prompt}`, '');
   if (structured.image_url) lines.push(`Image URL:\n${structured.image_url}`, '');
+  if (structured.audio_download_url) lines.push(`Audio URL:\n${structured.audio_download_url}`, '');
   if (structured.follow_up_prompts?.length) {
     lines.push('Follow-up prompts:');
     structured.follow_up_prompts.forEach((prompt, index) => lines.push(`${index + 1}. ${prompt}`));
@@ -665,13 +735,18 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
   const hasQuiz = Boolean(structured.quiz_question?.trim() || quizOptions.length);
   const hasNextStep = Boolean(structured.next_step?.trim());
   const hasImage = Boolean(structured.image_url?.trim());
+  const audioSrc = structured.audio_download_url
+    ? structured.audio_download_url.startsWith('http')
+      ? structured.audio_download_url
+      : `${getApiBaseUrl()}${structured.audio_download_url.startsWith('/') ? structured.audio_download_url : `/${structured.audio_download_url}`}`
+    : null;
 
   return (
     <div className="space-y-5 text-sm leading-7 text-foreground/95">
       <div className="rounded-3xl border border-border/70 bg-gradient-to-r from-secondary/10 via-card to-background px-4 py-4 md:px-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Output Template</div>
+            <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Assistant Response</div>
             <div className="mt-1 text-lg font-semibold leading-tight text-foreground">
               {structured.title || 'Structured response'}
             </div>
@@ -683,10 +758,6 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
             <span className="rounded-full bg-emerald-500/10 px-3 py-1 font-medium text-emerald-700">
               Confidence: {message.confidence || structured.confidence || 'High'}
             </span>
-            <div className="flex flex-wrap justify-end gap-2">
-              {structured.mode ? <span className="rounded-full bg-muted px-2.5 py-1 text-muted-foreground">{structured.mode}</span> : null}
-              {structured.style ? <span className="rounded-full bg-muted px-2.5 py-1 text-muted-foreground">{structured.style}</span> : null}
-            </div>
           </div>
         </div>
       </div>
@@ -697,9 +768,6 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
             <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Main Answer</div>
             <div className="text-sm text-muted-foreground">A natural explanation, written clearly and directly.</div>
           </div>
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
-            {structured.response_type || 'assistant'}
-          </span>
         </div>
         <div className="space-y-4">
           {renderRichContent(structured.answer || message.content)}
@@ -729,108 +797,124 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-12">
-        <div className="rounded-3xl border border-border/70 bg-background px-4 py-4 md:px-5 xl:col-span-7">
-          <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Key Takeaways</div>
-          <div className="mt-3 space-y-3">
-            {keyPoints.length ? (
-              keyPoints.slice(0, 5).map((point, index) => (
-                <div key={index} className="flex gap-3 rounded-2xl border border-border/60 bg-muted/20 px-3 py-3">
-                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-secondary/10 text-xs font-semibold text-secondary">
-                    {index + 1}
-                  </div>
-                  <div className="text-sm leading-6 text-foreground/90">{renderInline(point)}</div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-2xl border border-dashed border-border/70 px-3 py-4 text-sm text-muted-foreground">
-                No key points were returned for this answer.
-              </div>
-            )}
+      {audioSrc ? (
+        <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+          <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Audio Result</div>
+          <div className="mt-3">
+            <audio controls className="w-full" src={audioSrc} />
           </div>
-        </div>
-
-        <div className="space-y-4 xl:col-span-5">
-          {hasExample ? (
-            <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
-              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Example</div>
-              <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.example || '')}</div>
-            </div>
-          ) : null}
-
-          {hasNextStep ? (
-            <div className="rounded-3xl border border-border/70 bg-gradient-to-br from-secondary/10 to-background px-4 py-4 md:px-5">
-              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Next Step</div>
-              <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.next_step || '')}</div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {hasCode ? (
-        <div className="rounded-3xl border border-border/70 bg-slate-950 text-slate-50 px-4 py-4 md:px-5 shadow-[0_10px_30px_-22px_rgba(15,23,42,0.7)]">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.28em] text-slate-300/70">Code Sample</div>
-              <div className="text-sm text-slate-300/90">Copy, edit, and run this snippet in the lab.</div>
-            </div>
-            <button
-              onClick={() => void navigator.clipboard.writeText(structured.code_sample || '')}
-              className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-white/10 transition-colors"
-            >
-              Copy code
-            </button>
-          </div>
-          <pre className="overflow-x-auto text-xs leading-6 text-slate-100">
-            <code>{structured.code_sample}</code>
-          </pre>
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        {hasPractice ? (
-          <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
-            <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Practice</div>
-            <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.practice || '')}</div>
-          </div>
-        ) : null}
+      <details className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+        <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
+          More details
+        </summary>
+        <div className="mt-4 space-y-4">
+          <div className="grid gap-4 xl:grid-cols-12">
+            <div className="rounded-3xl border border-border/70 bg-background px-4 py-4 md:px-5 xl:col-span-7">
+              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Key Takeaways</div>
+              <div className="mt-3 space-y-3">
+                {keyPoints.length ? (
+                  keyPoints.slice(0, 5).map((point, index) => (
+                    <div key={index} className="flex gap-3 rounded-2xl border border-border/60 bg-muted/20 px-3 py-3">
+                      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-secondary/10 text-xs font-semibold text-secondary">
+                        {index + 1}
+                      </div>
+                      <div className="text-sm leading-6 text-foreground/90">{renderInline(point)}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-border/70 px-3 py-4 text-sm text-muted-foreground">
+                    No key points were returned for this answer.
+                  </div>
+                )}
+              </div>
+            </div>
 
-        {hasQuiz ? (
-          <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
-            <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Quick Check</div>
-            <div className="mt-3 text-base font-semibold text-foreground">{structured.quiz_question || 'Quick check'}</div>
-            {quizOptions.length ? (
-              <div className="mt-4 space-y-2">
-                {quizOptions.map((option) => (
-                  <button
-                    key={option}
-                    className="w-full rounded-2xl border border-border/70 bg-muted/20 px-4 py-3 text-left text-sm hover:border-primary/40 hover:bg-primary/5 transition-colors"
-                  >
-                    {option}
-                  </button>
-                ))}
+            <div className="space-y-4 xl:col-span-5">
+              {hasExample ? (
+                <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+                  <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Example</div>
+                  <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.example || '')}</div>
+                </div>
+              ) : null}
+
+              {hasNextStep ? (
+                <div className="rounded-3xl border border-border/70 bg-gradient-to-br from-secondary/10 to-background px-4 py-4 md:px-5">
+                  <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Next Step</div>
+                  <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.next_step || '')}</div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {hasCode ? (
+            <div className="rounded-3xl border border-border/70 bg-slate-950 text-slate-50 px-4 py-4 md:px-5 shadow-[0_10px_30px_-22px_rgba(15,23,42,0.7)]">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.28em] text-slate-300/70">Code Sample</div>
+                  <div className="text-sm text-slate-300/90">Copy, edit, and run this snippet in the lab.</div>
+                </div>
+                <button
+                  onClick={() => void navigator.clipboard.writeText(structured.code_sample || '')}
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-white/10 transition-colors"
+                >
+                  Copy code
+                </button>
+              </div>
+              <pre className="overflow-x-auto text-xs leading-6 text-slate-100">
+                <code>{structured.code_sample}</code>
+              </pre>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            {hasPractice ? (
+              <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+                <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Practice</div>
+                <div className="mt-3 text-sm leading-7 text-foreground/90">{renderRichContent(structured.practice || '')}</div>
+              </div>
+            ) : null}
+
+            {hasQuiz ? (
+              <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
+                <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Quick Check</div>
+                <div className="mt-3 text-base font-semibold text-foreground">{structured.quiz_question || 'Quick check'}</div>
+                {quizOptions.length ? (
+                  <div className="mt-4 space-y-2">
+                    {quizOptions.map((option) => (
+                      <button
+                        key={option}
+                        className="w-full rounded-2xl border border-border/70 bg-muted/20 px-4 py-3 text-left text-sm hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
-        ) : null}
-      </div>
 
-      {followUps.length ? (
-        <div className="rounded-3xl border border-border/70 bg-background px-4 py-4 md:px-5">
-          <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Follow-up prompts</div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {followUps.map((prompt) => (
-              <button
-                key={prompt}
-                onClick={() => onFollowUpPrompt(prompt)}
-                className="rounded-full border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
+          {followUps.length ? (
+            <div className="rounded-3xl border border-border/70 bg-background px-4 py-4 md:px-5">
+              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Follow-up prompts</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {followUps.map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => onFollowUpPrompt(prompt)}
+                    className="rounded-full border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </details>
     </div>
   );
 }

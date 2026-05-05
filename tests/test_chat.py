@@ -188,3 +188,84 @@ def test_chat_image_generation_and_history(tmp_path, monkeypatch):
     assert len(rows) == 1
     assert rows[0]["response_json"]["image_url"] == "https://example.com/generated.png"
     assert rows[0]["response_json"]["mode"] == "image"
+
+
+def test_chat_audio_generation_and_history(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    import app.routes.chat as chat_routes
+    from app.services import chatbot_service
+
+    monkeypatch.setattr(chatbot_service, "chatgpt_text", lambda *args, **kwargs: "AI explanation for the topic.")
+    monkeypatch.setattr(
+        chatbot_service,
+        "openai_json_schema",
+        lambda *args, **kwargs: {
+            "title": "Audio Ready",
+            "summary": "A short answer that can be converted to audio.",
+            "answer": "This is the assistant answer that should become audio.",
+            "key_points": ["One", "Two"],
+            "follow_up_prompts": ["Repeat it", "Show me again"],
+            "confidence": "High",
+            "mode": "detailed",
+            "style": "visual",
+        },
+    )
+    monkeypatch.setattr(chat_routes, "create_download_file", lambda *args, **kwargs: str(tmp_path / "generated.mp3"))
+
+    register = client.post(
+        "/api/auth/register",
+        json={
+            "email": "audio@example.com",
+            "password": "secret123",
+            "display_name": "Audio Learner",
+        },
+    )
+    token = register.get_json()["access_token"]
+
+    style = client.post(
+        "/api/style/select",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"learning_style": "visual"},
+    )
+    assert style.status_code == 200
+
+    thread = client.post(
+        "/api/chat/threads",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "Audio Chat"},
+    )
+    assert thread.status_code == 201
+    thread_id = thread.get_json()["thread_id"]
+
+    chat_response = client.post(
+        "/api/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "question": "Explain audio generation",
+            "mode": "detailed",
+            "thread_id": thread_id,
+        },
+    )
+    assert chat_response.status_code == 200
+    chat_id = chat_response.get_json()["chat_id"]
+
+    response = client.post(
+        "/api/chat/audio",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"chat_id": chat_id},
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["audio_download_url"].endswith(".mp3") or data["audio_download_url"].startswith("/api/downloads/file/")
+    assert data["chat_id"] == chat_id
+
+    history = client.get(
+        f"/api/chat/history?thread_id={thread_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert history.status_code == 200
+    rows = history.get_json()
+    assert len(rows) == 1
+    assert rows[0]["response_json"]["audio_download_url"]
+    assert rows[0]["response_json"]["audio_download_id"]

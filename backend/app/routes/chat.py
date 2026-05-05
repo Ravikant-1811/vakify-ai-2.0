@@ -247,8 +247,6 @@ def generate_chat_image():
     user_id = int(get_jwt_identity())
     payload = request.get_json(silent=True) or {}
     prompt = str(payload.get("prompt", "")).strip()
-    if not prompt:
-        return jsonify({"error": "prompt is required"}), 400
 
     requested_thread_id = payload.get("thread_id")
     try:
@@ -256,9 +254,29 @@ def generate_chat_image():
     except (TypeError, ValueError):
         return jsonify({"error": "thread_id must be a number"}), 400
 
+    requested_chat_id = payload.get("chat_id")
+    try:
+        requested_chat_id = int(requested_chat_id) if requested_chat_id not in {None, "", 0} else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "chat_id must be a number"}), 400
+
+    source_row = None
+    if requested_chat_id is not None:
+        source_row = ChatHistory.query.filter_by(chat_id=requested_chat_id, user_id=user_id).first()
+        if not source_row:
+            return jsonify({"error": "chat not found"}), 404
+        source_payload = _safe_parse_response(source_row.response) or {}
+        prompt = prompt or str(source_payload.get("answer") or source_payload.get("summary") or source_row.question or "").strip()
+        source_thread = ChatThreadMessage.query.filter_by(chat_id=source_row.chat_id, user_id=user_id).first()
+        if source_thread and requested_thread_id is None:
+            requested_thread_id = source_thread.thread_id
+
     thread = _resolve_thread(user_id, requested_thread_id, title_hint=_topic_title(prompt))
     if not thread:
         return jsonify({"error": "thread not found"}), 404
+
+    if not prompt:
+        return jsonify({"error": "prompt is required"}), 400
 
     image_url = generate_image_data_url(prompt, size=str(payload.get("size", "1024x1024")))
     if not image_url:
@@ -283,18 +301,27 @@ def generate_chat_image():
     }
 
     try:
-        history = ChatHistory(
-            user_id=user_id,
-            question=prompt,
-            response=json.dumps(response_payload, ensure_ascii=False),
-            response_type="visual",
-            learning_style_used="visual",
-        )
-        db.session.add(history)
-        db.session.flush()
-        db.session.add(ChatThreadMessage(thread_id=thread.thread_id, chat_id=history.chat_id, user_id=user_id))
-        thread.message_count = (thread.message_count or 0) + 1
-        thread.last_message_at = history.timestamp
+        if source_row is not None:
+            source_row.response_type = "visual"
+            source_row.learning_style_used = "visual"
+            _update_chat_history_response(source_row, **response_payload)
+            history = source_row
+        else:
+            history = ChatHistory(
+                user_id=user_id,
+                question=prompt,
+                response=json.dumps(response_payload, ensure_ascii=False),
+                response_type="visual",
+                learning_style_used="visual",
+            )
+            db.session.add(history)
+            db.session.flush()
+            db.session.add(ChatThreadMessage(thread_id=thread.thread_id, chat_id=history.chat_id, user_id=user_id))
+            thread.message_count = (thread.message_count or 0) + 1
+            thread.last_message_at = history.timestamp
+            thread.preview = _truncate(prompt, 280)
+            if not thread.title or thread.title == "New Chat":
+                thread.title = _topic_title(prompt)
         thread.preview = _truncate(prompt, 280)
         if not thread.title or thread.title == "New Chat":
             thread.title = _topic_title(prompt)
@@ -307,6 +334,56 @@ def generate_chat_image():
     response_payload["thread_id"] = thread.thread_id
     response_payload["thread_title"] = thread.title
     return jsonify(response_payload)
+
+
+@chat_bp.post("/audio")
+@jwt_required()
+def generate_chat_audio():
+    user_id = int(get_jwt_identity())
+    payload = request.get_json(silent=True) or {}
+
+    requested_chat_id = payload.get("chat_id")
+    try:
+        requested_chat_id = int(requested_chat_id) if requested_chat_id not in {None, "", 0} else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "chat_id must be a number"}), 400
+
+    if requested_chat_id is None:
+        return jsonify({"error": "chat_id is required"}), 400
+
+    row = ChatHistory.query.filter_by(chat_id=requested_chat_id, user_id=user_id).first()
+    if not row:
+        return jsonify({"error": "chat not found"}), 404
+
+    parsed = _safe_parse_response(row.response) or {}
+    audio_text = str(
+        payload.get("text")
+        or parsed.get("answer")
+        or parsed.get("summary")
+        or row.question
+        or ""
+    ).strip()
+    if not audio_text:
+        return jsonify({"error": "audio text is required"}), 400
+
+    try:
+        audio_path = create_download_file(user_id, "audio", audio_text)
+        audio_row = Download(user_id=user_id, content_type="audio", file_path=audio_path)
+        db.session.add(audio_row)
+        db.session.flush()
+        parsed["audio_download_id"] = audio_row.download_id
+        parsed["audio_download_url"] = f"/api/downloads/file/{audio_row.download_id}"
+        row.response = json.dumps(parsed, ensure_ascii=False)
+        row.response_type = row.response_type or "auditory"
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "temporary database issue. please retry"}), 503
+
+    parsed["chat_id"] = row.chat_id
+    thread_message = ChatThreadMessage.query.filter_by(chat_id=row.chat_id, user_id=user_id).first()
+    parsed["thread_id"] = thread_message.thread_id if thread_message else None
+    return jsonify(parsed)
 
 
 @chat_bp.get("/threads")
@@ -416,6 +493,15 @@ def _safe_parse_response(raw: str):
         return parsed if isinstance(parsed, dict) else None
     except Exception:
         return None
+
+
+def _update_chat_history_response(row: ChatHistory, **updates):
+    payload = _safe_parse_response(row.response) or {}
+    for key, value in updates.items():
+        if value is not None:
+            payload[key] = value
+    row.response = json.dumps(payload, ensure_ascii=False)
+    return payload
 
 
 @chat_bp.get("/suggestions")
