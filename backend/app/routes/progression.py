@@ -53,7 +53,7 @@ def _ensure_profile(user_id: int) -> UserProfile:
                 user_id=user_id,
                 difficulty_level="beginner",
                 topic_mastery_json={},
-                preferred_languages=["python", "java"],
+                preferred_languages=[],
             )
             db.session.add(profile)
     return profile
@@ -77,10 +77,10 @@ def _ensure_streak(user_id: int) -> UserStreak:
     return streak
 
 
-def _preferred_language(profile: UserProfile | None) -> str:
+def _preferred_language(profile: UserProfile | None) -> str | None:
     if profile and isinstance(profile.preferred_languages, list) and profile.preferred_languages:
         return normalize_language(profile.preferred_languages[0])
-    return "python"
+    return None
 
 
 def _touch_streak(streak: UserStreak, active_day: date) -> None:
@@ -458,6 +458,8 @@ def _serialize_task(task: DailyTask) -> dict:
 
 def _sync_daily_tasks(user_id: int, profile: UserProfile, today: date) -> list[DailyTask]:
     language = _preferred_language(profile)
+    if not language:
+        return []
     difficulty = profile.difficulty_level or "beginner"
     desired = build_daily_task_bundle(language, difficulty)
     rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).order_by(DailyTask.task_id.asc()).all()
@@ -630,7 +632,10 @@ def get_weekly_quiz():
     week_start, week_end = _week_bounds(today)
 
     profile = _ensure_profile(user_id)
-    bundle = build_weekly_quiz_bundle(_preferred_language(profile), profile.difficulty_level or "beginner")
+    language = _preferred_language(profile)
+    if not language:
+        return jsonify({"quiz": None, "attempts": 0, "best_score": 0.0, "message": "preferred language not set"}), 200
+    bundle = build_weekly_quiz_bundle(language, profile.difficulty_level or "beginner")
     with db.session.no_autoflush:
         quiz = WeeklyQuiz.query.filter_by(user_id=user_id, week_start=week_start).first()
         if not quiz:
@@ -669,7 +674,7 @@ def get_weekly_quiz():
                 "week_end": quiz.week_end.isoformat(),
                 "difficulty": quiz.difficulty,
                 "questions": quiz.question_payload,
-                "language": _preferred_language(profile),
+                "language": language,
             },
             "attempts": len(attempts),
             "best_score": round(best_score, 2),

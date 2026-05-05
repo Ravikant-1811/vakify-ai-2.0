@@ -4,8 +4,8 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_request
 
 from app.extensions import db
-from app.models import LearningStyle, OnboardingAssessment, UserProfile
-from app.services.assessment_service import get_assessment_questions, normalize_language, score_assessment
+from app.models import LearningStyle, UserProfile
+from app.services.assessment_service import get_assessment_questions, score_assessment
 
 
 assessment_bp = Blueprint("assessment", __name__, url_prefix="/api/assessment")
@@ -27,7 +27,6 @@ def _ensure_profile(user_id: int) -> UserProfile:
 
 @assessment_bp.get("/questions")
 def assessment_questions():
-    language = normalize_language(request.args.get("language"))
     user_id = None
     try:
         verify_jwt_in_request(optional=True)
@@ -37,29 +36,26 @@ def assessment_questions():
         user_id = None
 
     if user_id is not None:
-        assessment = OnboardingAssessment.query.filter_by(user_id=user_id).first()
-        if assessment and assessment.preferred_language == language:
+        style = db.session.get(LearningStyle, user_id)
+        if style:
+            questions = get_assessment_questions(None)
             return jsonify(
                 {
-                    "language": assessment.preferred_language,
-                    "questions": [
-                        {
-                            "id": item["id"],
-                            "prompt": item["prompt"],
-                            "options": item["options"],
-                            "topic": item["topic"],
-                        }
-                        for item in assessment.questions_json
-                    ],
-                    "total_questions": assessment.total_questions,
+                    "questions": questions,
+                    "total_questions": len(questions),
                     "saved": True,
+                    "assessment": {
+                        "learning_style": style.learning_style,
+                        "visual_score": style.visual_score,
+                        "auditory_score": style.auditory_score,
+                        "kinesthetic_score": style.kinesthetic_score,
+                    },
                 }
             )
 
-    questions = get_assessment_questions(language)
+    questions = get_assessment_questions(None)
     return jsonify(
         {
-            "language": language,
             "questions": questions,
             "total_questions": len(questions),
             "saved": False,
@@ -72,61 +68,59 @@ def assessment_questions():
 def submit_assessment():
     user_id = int(get_jwt_identity())
     payload = request.get_json() or {}
-    language = normalize_language(payload.get("preferred_language"))
     answers = payload.get("answers", {})
     if not isinstance(answers, dict):
         return jsonify({"error": "answers must be an object"}), 400
 
-    questions = get_assessment_questions(language)
-    scoring = score_assessment(language, answers)
+    scoring = score_assessment(None, answers)
     profile = _ensure_profile(user_id)
-    profile.difficulty_level = scoring["recommended_level"]
-    profile.preferred_languages = [language]
+    profile.difficulty_level = "beginner"
+    profile.visual_weight = max(0.05, scoring["visual_score"] / max(1, scoring["total"]))
+    profile.auditory_weight = max(0.05, scoring["auditory_score"] / max(1, scoring["total"]))
+    profile.kinesthetic_weight = max(0.05, scoring["kinesthetic_score"] / max(1, scoring["total"]))
     profile.topic_mastery_json = {
-        "weak_topics": scoring["weak_topics"],
+        "weak_topics": [
+            f"{topic.title()} Learning Practice"
+            for topic in scoring["weak_topics"]
+        ],
         "assessment": {
-            "language": language,
+            "learning_style": scoring["learning_style"],
             "percentage": scoring["percentage"],
-            "correct": scoring["correct"],
+            "visual_score": scoring["visual_score"],
+            "auditory_score": scoring["auditory_score"],
+            "kinesthetic_score": scoring["kinesthetic_score"],
             "total": scoring["total"],
         },
     }
 
-    record = db.session.get(OnboardingAssessment, user_id)
-    if not record:
-        record = OnboardingAssessment(
-            user_id=user_id,
-            preferred_language=language,
-            total_questions=scoring["total"],
-            correct_answers=scoring["correct"],
-            percentage=scoring["percentage"],
-            recommended_level=scoring["recommended_level"],
-            questions_json=questions,
-            answers_json=answers,
-            weak_topics_json=scoring["weak_topics"],
-        )
-        db.session.add(record)
-    else:
-        record.preferred_language = language
-        record.total_questions = scoring["total"]
-        record.correct_answers = scoring["correct"]
-        record.percentage = scoring["percentage"]
-        record.recommended_level = scoring["recommended_level"]
-        record.questions_json = questions
-        record.answers_json = answers
-        record.weak_topics_json = scoring["weak_topics"]
-
     style = db.session.get(LearningStyle, user_id)
     if style and not style.learning_style:
-        style.learning_style = "visual"
+        style.learning_style = scoring["learning_style"]
+    if not style:
+        style = LearningStyle(
+            user_id=user_id,
+            learning_style=scoring["learning_style"],
+            visual_score=scoring["visual_score"],
+            auditory_score=scoring["auditory_score"],
+            kinesthetic_score=scoring["kinesthetic_score"],
+        )
+        db.session.add(style)
+    else:
+        style.learning_style = scoring["learning_style"]
+        style.visual_score = scoring["visual_score"]
+        style.auditory_score = scoring["auditory_score"]
+        style.kinesthetic_score = scoring["kinesthetic_score"]
+
     db.session.commit()
 
     return jsonify(
         {
             "message": "assessment saved",
             "assessment": {
-                "language": language,
-                "score": scoring["correct"],
+                "learning_style": scoring["learning_style"],
+                "visual_score": scoring["visual_score"],
+                "auditory_score": scoring["auditory_score"],
+                "kinesthetic_score": scoring["kinesthetic_score"],
                 "total": scoring["total"],
                 "percentage": scoring["percentage"],
                 "recommended_level": scoring["recommended_level"],

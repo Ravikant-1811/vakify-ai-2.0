@@ -19,6 +19,8 @@ export interface User {
   auditoryWeight?: number;
   kinestheticWeight?: number;
   weakTopics?: string[];
+  phoneNumber?: string;
+  otherDetails?: Record<string, unknown> | string | null;
   onboarded: boolean;
 }
 
@@ -30,6 +32,7 @@ interface AuthContextType {
   beginGoogleLogin: () => Promise<void>;
   completeGoogleLogin: (code: string, state?: string | null) => Promise<User>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
+  completeOnboarding: (updates: Partial<User> & { phoneNumber?: string; otherDetails?: Record<string, unknown> | string | null }) => Promise<void>;
   logout: () => void;
   updateUser: (updates: Partial<User>) => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -136,6 +139,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(mapUser(response.user));
   };
 
+  const completeOnboarding = async (
+    updates: Partial<User> & { phoneNumber?: string; otherDetails?: Record<string, unknown> | string | null },
+  ) => {
+    const response = await apiFetch<Record<string, any>>('/api/auth/onboarding/complete', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: updates.displayName,
+        email: updates.email,
+        preferred_language: updates.preferredLanguage,
+        phone_number: updates.phoneNumber,
+        other_details: updates.otherDetails,
+      }),
+    });
+    setUser(mapUser(response.user));
+  };
+
   const logout = async () => {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
@@ -156,6 +175,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (updates.visualWeight !== undefined) payload.visual_weight = updates.visualWeight;
       if (updates.auditoryWeight !== undefined) payload.auditory_weight = updates.auditoryWeight;
       if (updates.kinestheticWeight !== undefined) payload.kinesthetic_weight = updates.kinestheticWeight;
+      if (updates.phoneNumber !== undefined) payload.phone_number = updates.phoneNumber;
+      if (updates.otherDetails !== undefined) payload.other_details = updates.otherDetails;
       if (updates.xp !== undefined) payload.xp = updates.xp;
       if (updates.level !== undefined) payload.level = updates.level;
       if (updates.streak !== undefined) payload.streak = updates.streak;
@@ -185,7 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, ready, login, beginDevAdminLogin, beginGoogleLogin, completeGoogleLogin, signup, logout, updateUser, refreshUser }}>
+    <AuthContext.Provider value={{ user, ready, login, beginDevAdminLogin, beginGoogleLogin, completeGoogleLogin, signup, completeOnboarding, logout, updateUser, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
@@ -208,6 +229,8 @@ function mapUser(data: Record<string, any>): User {
     auditoryWeight: data.auditoryWeight ?? data.auditory_weight ?? undefined,
     kinestheticWeight: data.kinestheticWeight ?? data.kinesthetic_weight ?? undefined,
     weakTopics: data.weakTopics ?? data.weak_topics ?? undefined,
+    phoneNumber: data.phoneNumber ?? data.phone_number ?? undefined,
+    otherDetails: data.otherDetails ?? data.other_details ?? data.other_details_json ?? undefined,
     onboarded: Boolean(data.onboarded),
   };
 }

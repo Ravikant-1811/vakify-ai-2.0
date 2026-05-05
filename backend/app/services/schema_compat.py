@@ -16,6 +16,11 @@ def ensure_schema_compatibility(db) -> list[str]:
         "daily_tasks": {
             "content_json": "JSON",
         },
+        "user_profile": {
+            "phone_number": "VARCHAR(40)",
+            "other_details_json": "JSON",
+            "onboarding_completed_at": "DATETIME",
+        },
     }
 
     for table_name, columns in legacy_columns.items():

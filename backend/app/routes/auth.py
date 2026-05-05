@@ -65,6 +65,12 @@ def _ensure_profile(user_id: int) -> UserProfile:
     return profile
 
 
+def _sync_progression_if_ready(user_id: int, profile: UserProfile) -> None:
+    preferred_languages = profile.preferred_languages if isinstance(profile.preferred_languages, list) else []
+    if preferred_languages:
+        ensure_daily_and_weekly_progression(user_id, profile, datetime.utcnow().date())
+
+
 def _progress_summary(user_id: int) -> dict:
     wallet = _ensure_wallet(user_id)
     streak = _ensure_streak(user_id)
@@ -83,11 +89,17 @@ def _progress_summary(user_id: int) -> dict:
         practice_accuracy = (len(completed_practice) / len(practice_rows)) * 100
 
     accuracy = round(min(100.0, max(quiz_accuracy, practice_accuracy)), 2)
-    onboarded = bool(style)
+    onboarded = False
+    if profile and profile.onboarding_completed_at:
+        onboarded = True
+    elif profile and style and isinstance(profile.preferred_languages, list) and profile.preferred_languages:
+        onboarded = True
 
     preferred_language = None
     weak_topics = []
     learning_level = "beginner"
+    phone_number = None
+    other_details = None
     if profile:
         learning_level = profile.difficulty_level or "beginner"
         preferred_languages = profile.preferred_languages or []
@@ -97,6 +109,8 @@ def _progress_summary(user_id: int) -> dict:
         raw_topics = mastery.get("weak_topics") if isinstance(mastery, dict) else None
         if isinstance(raw_topics, list):
             weak_topics = [str(item) for item in raw_topics if str(item).strip()][:12]
+        phone_number = profile.phone_number
+        other_details = profile.other_details_json
 
     return {
         "xp": wallet.current_xp,
@@ -108,6 +122,8 @@ def _progress_summary(user_id: int) -> dict:
         "learningLevel": learning_level.capitalize() if learning_level else "Beginner",
         "preferredLanguage": preferred_language,
         "weakTopics": weak_topics,
+        "phoneNumber": phone_number,
+        "otherDetails": other_details,
     }
 
 
@@ -126,6 +142,8 @@ def _serialize_user(user: User) -> dict:
         "learningLevel": summary["learningLevel"],
         "preferredLanguage": summary["preferredLanguage"],
         "weakTopics": summary["weakTopics"],
+        "phoneNumber": summary["phoneNumber"],
+        "otherDetails": summary["otherDetails"],
         "onboarded": summary["onboarded"],
     }
 
@@ -157,6 +175,20 @@ def _touch_profile(user_id: int, data: dict) -> None:
         if isinstance(weak_topics, list):
             clean_topics = [str(item).strip() for item in weak_topics if str(item).strip()]
             profile.topic_mastery_json = {"weak_topics": clean_topics}
+
+    if "phone_number" in data:
+        phone_number = str(data.get("phone_number", "")).strip()
+        profile.phone_number = phone_number or None
+
+    if "other_details" in data:
+        other_details = data.get("other_details")
+        if isinstance(other_details, dict):
+            profile.other_details_json = other_details
+        elif isinstance(other_details, str):
+            cleaned = other_details.strip()
+            profile.other_details_json = {"notes": cleaned} if cleaned else {}
+    if "other_details_json" in data and isinstance(data.get("other_details_json"), dict):
+        profile.other_details_json = data.get("other_details_json")
 
     db.session.commit()
 
@@ -218,7 +250,6 @@ def register():
 
     user = _find_or_create_user(email=email, name=name, password=password)
     profile = _ensure_profile(user.user_id)
-    ensure_daily_and_weekly_progression(user.user_id, profile, datetime.utcnow().date())
     db.session.commit()
     token = _issue_token(user)
     return jsonify({"access_token": token, "user": _serialize_user(user)})
@@ -233,7 +264,7 @@ def me():
         return jsonify({"error": "user not found"}), 404
 
     profile = _ensure_profile(user_id)
-    ensure_daily_and_weekly_progression(user_id, profile, datetime.utcnow().date())
+    _sync_progression_if_ready(user_id, profile)
     db.session.commit()
 
     payload = _serialize_user(user)
@@ -317,7 +348,6 @@ def dev_login_admin():
 
     _ensure_admin_override(user, "local development admin login")
     profile = _ensure_profile(user.user_id)
-    ensure_daily_and_weekly_progression(user.user_id, profile, datetime.utcnow().date())
     db.session.commit()
 
     token = _issue_token(user)
@@ -423,13 +453,23 @@ def update_me():
         user.password_hash = generate_password_hash(password)
 
     profile_updates = {}
-    for field in ("learning_level", "preferred_language", "visual_weight", "auditory_weight", "kinesthetic_weight", "weak_topics"):
+    for field in (
+        "learning_level",
+        "preferred_language",
+        "visual_weight",
+        "auditory_weight",
+        "kinesthetic_weight",
+        "weak_topics",
+        "phone_number",
+        "other_details",
+        "other_details_json",
+    ):
         if field in data:
             profile_updates[field] = data[field]
     if profile_updates:
         _touch_profile(user_id, profile_updates)
         profile = _ensure_profile(user_id)
-        ensure_daily_and_weekly_progression(user_id, profile, datetime.utcnow().date())
+        _sync_progression_if_ready(user_id, profile)
 
     db.session.commit()
     return jsonify(
@@ -438,6 +478,54 @@ def update_me():
             "user": _serialize_user(user),
         }
     )
+
+
+@auth_bp.post("/onboarding/complete")
+@jwt_required()
+def complete_onboarding():
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+
+    data = request.get_json() or {}
+    name = str(data.get("name", user.name)).strip()
+    email = str(data.get("email", user.email)).strip().lower()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if not email:
+        return jsonify({"error": "email is required"}), 400
+
+    existing = User.query.filter(User.email == email, User.user_id != user_id).first()
+    if existing:
+        return jsonify({"error": "email already exists"}), 409
+    user.name = name
+    user.email = email
+
+    profile = _ensure_profile(user_id)
+    language = str(data.get("preferred_language", "")).strip()
+    if not language:
+        return jsonify({"error": "preferred_language is required"}), 400
+
+    profile_updates = {
+        "preferred_language": data.get("preferred_language"),
+        "phone_number": data.get("phone_number"),
+        "other_details": data.get("other_details"),
+        "visual_weight": data.get("visual_weight"),
+        "auditory_weight": data.get("auditory_weight"),
+        "kinesthetic_weight": data.get("kinesthetic_weight"),
+    }
+    _touch_profile(user_id, profile_updates)
+
+    profile.preferred_languages = [language]
+
+    profile.onboarding_completed_at = datetime.utcnow()
+    if not profile.difficulty_level:
+        profile.difficulty_level = "beginner"
+
+    _sync_progression_if_ready(user_id, profile)
+    db.session.commit()
+    return jsonify({"message": "onboarding completed", "user": _serialize_user(user)})
 
 
 @auth_bp.post("/logout")

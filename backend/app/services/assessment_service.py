@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
+
+from app.services.style_engine import QUESTIONS as STYLE_QUESTIONS
 
 
 SUPPORTED_LANGUAGES = {"python", "javascript", "java", "c++", "c"}
@@ -188,72 +191,83 @@ def _build_questions(language: str) -> list[QuestionTemplate]:
     ]
 
 
-def get_assessment_questions(language: str | None) -> list[dict]:
-    normalized = normalize_language(language)
-    questions = _build_questions(normalized)
-    return [
-        {
-            "id": q.question_id,
-            "prompt": q.prompt,
-            "options": q.options,
-            "topic": q.topic,
-        }
-        for q in questions
-    ]
+def _style_questions() -> list[dict]:
+    questions = []
+    for idx, item in enumerate(STYLE_QUESTIONS[:10], start=1):
+        questions.append(
+            {
+                "id": f"style-q{idx}",
+                "prompt": item["question"],
+                "options": [option["text"] for option in item["options"]],
+                "topic": "Learning Style",
+            }
+        )
+    return questions
+
+
+def get_assessment_questions(language: str | None = None) -> list[dict]:
+    del language
+    return _style_questions()
 
 
 def score_assessment(language: str | None, answers: dict) -> dict:
-    normalized = normalize_language(language)
-    questions = _build_questions(normalized)
+    del language
+    questions = STYLE_QUESTIONS[:10]
     answer_map = {str(key): value for key, value in (answers or {}).items()}
 
-    correct = 0
-    weak_topics: list[str] = []
-    results: list[dict] = []
+    style_counts: Counter[str] = Counter()
+    question_results: list[dict] = []
 
-    for question in questions:
-        raw_answer = answer_map.get(question.question_id)
+    for idx, question in enumerate(questions, start=1):
+        question_id = f"style-q{idx}"
+        raw_answer = answer_map.get(question_id)
         try:
             answer_index = int(raw_answer)
         except (TypeError, ValueError):
             answer_index = -1
-        is_correct = answer_index == question.correct_index
-        if is_correct:
-            correct += 1
-        else:
-            weak_topics.append(question.topic)
-        results.append(
+
+        option_styles = [option["style"] for option in question["options"]]
+        selected_style = option_styles[answer_index] if 0 <= answer_index < len(option_styles) else None
+        if selected_style:
+            style_counts[selected_style] += 1
+
+        question_results.append(
             {
-                "id": question.question_id,
-                "correct": is_correct,
+                "id": question_id,
                 "selected": answer_index,
-                "topic": question.topic,
+                "style": selected_style,
             }
         )
 
     total = len(questions)
-    percentage = round((correct / total) * 100, 2) if total else 0.0
-    if percentage >= 80:
-        level = "advanced"
-    elif percentage >= 55:
-        level = "intermediate"
-    else:
-        level = "beginner"
+    dominant_style = "visual"
+    if style_counts:
+        dominant_style = sorted(style_counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
 
-    deduped_weak_topics = []
-    seen = set()
-    for topic in weak_topics:
-        if topic in seen:
-            continue
-        seen.add(topic)
-        deduped_weak_topics.append(topic)
+    visual = style_counts.get("visual", 0)
+    auditory = style_counts.get("auditory", 0)
+    kinesthetic = style_counts.get("kinesthetic", 0)
+    percentage = round((max(visual, auditory, kinesthetic) / total) * 100, 2) if total else 0.0
+    weak_topics = [
+        label
+        for label, score in (
+            ("visual", visual),
+            ("auditory", auditory),
+            ("kinesthetic", kinesthetic),
+        )
+        if score == 0 or score < max(1, (total // 3) - 1)
+    ]
 
     return {
-        "language": normalized,
-        "correct": correct,
+        "language": None,
+        "correct": max(visual, auditory, kinesthetic),
         "total": total,
         "percentage": percentage,
-        "recommended_level": level,
-        "weak_topics": deduped_weak_topics[:8],
-        "results": results,
+        "recommended_level": "beginner",
+        "weak_topics": weak_topics[:3],
+        "results": question_results,
+        "learning_style": dominant_style,
+        "visual_score": visual,
+        "auditory_score": auditory,
+        "kinesthetic_score": kinesthetic,
     }

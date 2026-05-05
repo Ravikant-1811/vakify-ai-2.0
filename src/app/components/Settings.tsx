@@ -14,9 +14,33 @@ type SettingsResponse = {
   };
 };
 
+function formatOtherDetails(value: unknown): string {
+  if (!value) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const notes = record.notes;
+    if (typeof notes === 'string') {
+      return notes;
+    }
+    try {
+      return JSON.stringify(value, null, 0);
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
 export function Settings() {
   const { user, updateUser } = useAuth();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
+  const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber || '');
+  const [otherDetails, setOtherDetails] = useState(formatOtherDetails(user?.otherDetails));
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light');
   const [language, setLanguage] = useState('English');
   const [notifications, setNotifications] = useState({
@@ -60,14 +84,26 @@ export function Settings() {
 
   useEffect(() => {
     setDisplayName(user?.displayName || '');
-  }, [user?.displayName]);
+    setPhoneNumber(user?.phoneNumber || '');
+    setOtherDetails(formatOtherDetails(user?.otherDetails));
+  }, [user?.displayName, user?.phoneNumber, user?.otherDetails]);
 
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
     try {
-      if (displayName.trim() && displayName !== user?.displayName) {
-        await updateUser({ displayName: displayName.trim() });
+      const detailsPayload = otherDetails.trim() ? { notes: otherDetails.trim() } : null;
+      const detailsChanged =
+        formatOtherDetails(user?.otherDetails) !== otherDetails;
+      const phoneChanged = phoneNumber.trim() !== (user?.phoneNumber || '');
+      const nameChanged = displayName.trim() !== (user?.displayName || '');
+
+      if (nameChanged || phoneChanged || detailsChanged) {
+        await updateUser({
+          displayName: displayName.trim() || user?.displayName || '',
+          phoneNumber: phoneNumber.trim(),
+          otherDetails: detailsPayload,
+        });
       }
 
       await apiFetch('/api/settings/me', {
@@ -119,6 +155,25 @@ export function Settings() {
                 disabled
               />
               <p className="text-xs text-muted-foreground mt-1">Email cannot be changed</p>
+            </div>
+            <div>
+              <label className="block text-sm mb-2">Phone Number</label>
+              <input
+                type="tel"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
+                placeholder="Your phone number"
+              />
+            </div>
+            <div>
+              <label className="block text-sm mb-2">Other Details</label>
+              <textarea
+                value={otherDetails}
+                onChange={(e) => setOtherDetails(e.target.value)}
+                className="w-full min-h-28 px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
+                placeholder="Tell Vakify anything else we should know"
+              />
             </div>
           </div>
         </div>

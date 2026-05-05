@@ -123,9 +123,12 @@ class UserProfile(db.Model):
     difficulty_level = db.Column(db.String(20), default="beginner", nullable=False)
     topic_mastery_json = db.Column(db.JSON, nullable=True)
     preferred_languages = db.Column(db.JSON, nullable=True)
+    phone_number = db.Column(db.String(40), nullable=True)
+    other_details_json = db.Column(db.JSON, nullable=True)
     visual_weight = db.Column(db.Float, default=0.33, nullable=False)
     auditory_weight = db.Column(db.Float, default=0.33, nullable=False)
     kinesthetic_weight = db.Column(db.Float, default=0.34, nullable=False)
+    onboarding_completed_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

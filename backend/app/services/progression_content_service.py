@@ -651,6 +651,8 @@ def build_weekly_quiz_bundle(language: str | None, difficulty: str | None) -> di
 
 def ensure_daily_and_weekly_progression(user_id: int, profile: UserProfile, today: date) -> None:
     language = _preferred_language(profile)
+    if not language:
+        return
     difficulty = profile.difficulty_level or "beginner"
     daily_rows = DailyTask.query.filter_by(user_id=user_id, due_date=today).all()
     if not daily_rows:
