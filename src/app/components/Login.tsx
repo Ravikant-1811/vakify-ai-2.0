@@ -56,8 +56,8 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen flex">
-      <div className="flex-1 bg-gradient-to-br from-[#1E3A5F] via-[#2a4a6f] to-[#1B998B] relative overflow-hidden">
+    <div className="min-h-screen flex flex-col lg:flex-row bg-background">
+      <div className="hidden lg:flex lg:flex-1 bg-gradient-to-br from-[#1E3A5F] via-[#2a4a6f] to-[#1B998B] relative overflow-hidden">
         <div className="absolute inset-0 opacity-10">
           {Array.from({ length: 20 }).map((_, i) => (
             <div
@@ -118,13 +118,24 @@ export function Login() {
         </div>
       </div>
 
-      <div className="flex-1 bg-white flex items-center justify-center p-8">
-        <div className="w-full max-w-md">
-          <div className="mb-8">
-            <h2 className="text-3xl mb-2">
+      <div className="flex-1 bg-white flex items-center justify-center px-4 py-6 sm:px-6 sm:py-8 lg:p-8">
+        <div className="w-full max-w-md lg:max-w-md">
+          <div className="lg:hidden mb-6 rounded-3xl bg-gradient-to-br from-[#1E3A5F] via-[#2a4a6f] to-[#1B998B] text-white p-5 shadow-lg">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-white/80">
+              <Sparkles className="w-4 h-4 text-[#F4A261]" />
+              Vakify 2.0
+            </div>
+            <h1 className="mt-3 text-3xl font-bold tracking-tight">Your adaptive learning OS</h1>
+            <p className="mt-2 text-sm text-white/85">
+              Learn, chat, practice, and track progress in one place.
+            </p>
+          </div>
+
+          <div className="mb-6 sm:mb-8">
+            <h2 className="text-2xl sm:text-3xl mb-2">
               {isSignup ? 'Create Account' : 'Welcome Back'}
             </h2>
-            <p className="text-muted-foreground">
+            <p className="text-sm sm:text-base text-muted-foreground">
               {isSignup ? 'Start your learning journey' : 'Sign in to continue your progress'}
             </p>
           </div>
@@ -137,7 +148,7 @@ export function Login() {
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
+                  className="w-full px-4 py-3 rounded-xl border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary text-base"
                   placeholder="Enter your name"
                   required={isSignup}
                 />
@@ -152,7 +163,7 @@ export function Login() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
+                  className="w-full pl-11 pr-4 py-3 rounded-xl border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary text-base"
                   placeholder="Enter your email"
                   required
                 />
@@ -167,7 +178,7 @@ export function Login() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 rounded-lg border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary"
+                  className="w-full pl-11 pr-4 py-3 rounded-xl border border-border bg-input-background focus:outline-none focus:ring-2 focus:ring-secondary text-base"
                   placeholder="Enter your password"
                   required
                 />
@@ -175,7 +186,7 @@ export function Login() {
             </div>
 
             {error && (
-              <div className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg text-sm">
+              <div className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-xl text-sm">
                 {error}
               </div>
             )}
@@ -183,7 +194,7 @@ export function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {loading ? 'Please wait...' : (isSignup ? 'Create Account' : 'Sign In')}
             </button>
@@ -192,7 +203,7 @@ export function Login() {
               type="button"
               onClick={handleGoogleLogin}
               disabled={loading}
-              className="w-full border border-border py-3 rounded-lg hover:bg-muted transition-colors flex items-center justify-center gap-3 disabled:opacity-50"
+              className="w-full border border-border py-3.5 rounded-xl hover:bg-muted transition-colors flex items-center justify-center gap-3 disabled:opacity-50"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -208,13 +219,13 @@ export function Login() {
                 type="button"
                 onClick={handleDevAdminLogin}
                 disabled={loading}
-                className="w-full border border-emerald-200 bg-emerald-50 text-emerald-800 py-3 rounded-lg hover:bg-emerald-100 transition-colors flex items-center justify-center gap-3 disabled:opacity-50"
+                className="w-full border border-emerald-200 bg-emerald-50 text-emerald-800 py-3.5 rounded-xl hover:bg-emerald-100 transition-colors flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 Continue as Admin (Local)
               </button>
             )}
 
-            <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+            <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
               Use Google for one-click sign in, or create a local account with your email and password.
             </div>
           </form>
@@ -229,7 +240,7 @@ export function Login() {
           </div>
 
           {!isSignup && (
-            <div className="mt-8 p-4 bg-muted/50 rounded-lg">
+            <div className="mt-6 sm:mt-8 p-4 bg-muted/50 rounded-xl">
               <p className="text-sm text-muted-foreground mb-2">Sign in</p>
               <p className="text-xs text-muted-foreground">Use your own account to continue your learning progress.</p>
             </div>
