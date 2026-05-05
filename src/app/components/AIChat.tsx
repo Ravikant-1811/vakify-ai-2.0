@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Send,
   Sparkles,
@@ -14,7 +14,7 @@ import {
   ImagePlus,
   Volume2,
 } from 'lucide-react';
-import { apiFetch, getApiBaseUrl } from '../lib/api';
+import { apiFetch, apiFetchBlob } from '../lib/api';
 
 type ConfidenceLevel = 'High' | 'Medium' | 'Low';
 
@@ -73,6 +73,8 @@ export function AIChat() {
   const [activeThreadId, setActiveThreadId] = useState<number | null>(null);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [assetAction, setAssetAction] = useState<{ chatId: number; kind: 'image' | 'audio' } | null>(null);
+  const [audioUrls, setAudioUrls] = useState<Record<number, string>>({});
+  const audioUrlsRef = useRef<Record<number, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +108,51 @@ export function AIChat() {
     void loadThreads();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loading = new Set<number>();
+
+    const hydrateAudio = async () => {
+      const targets = messages.filter((message) => message.role === 'assistant' && message.chatId && message.structured?.audio_download_url);
+      for (const message of targets) {
+        const chatId = message.chatId as number;
+        if (audioUrlsRef.current[chatId] || loading.has(chatId)) {
+          continue;
+        }
+        loading.add(chatId);
+        try {
+          const blob = await apiFetchBlob(message.structured?.audio_download_url || '');
+          if (cancelled) {
+            continue;
+          }
+          const objectUrl = window.URL.createObjectURL(blob);
+          audioUrlsRef.current[chatId] = objectUrl;
+          setAudioUrls((prev) => ({
+            ...prev,
+            [chatId]: objectUrl,
+          }));
+        } catch {
+          if (!cancelled) {
+            // ignore and keep the audio action available for retry
+          }
+        }
+      }
+    };
+
+    void hydrateAudio();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(audioUrlsRef.current).forEach((url) => window.URL.revokeObjectURL(url));
+      audioUrlsRef.current = {};
     };
   }, []);
 
@@ -327,6 +374,19 @@ export function AIChat() {
         body: JSON.stringify({ chat_id: message.chatId }),
       });
       mergeStructuredMessage(message.chatId, response);
+      if (response.audio_download_url) {
+        try {
+          const blob = await apiFetchBlob(response.audio_download_url);
+          const objectUrl = window.URL.createObjectURL(blob);
+          audioUrlsRef.current[message.chatId as number] = objectUrl;
+          setAudioUrls((prev) => ({
+            ...prev,
+            [message.chatId as number]: objectUrl,
+          }));
+        } catch {
+          // keep the audio card visible even if inline playback fails
+        }
+      }
     } finally {
       setAssetAction(null);
     }
@@ -735,11 +795,7 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
   const hasQuiz = Boolean(structured.quiz_question?.trim() || quizOptions.length);
   const hasNextStep = Boolean(structured.next_step?.trim());
   const hasImage = Boolean(structured.image_url?.trim());
-  const audioSrc = structured.audio_download_url
-    ? structured.audio_download_url.startsWith('http')
-      ? structured.audio_download_url
-      : `${getApiBaseUrl()}${structured.audio_download_url.startsWith('/') ? structured.audio_download_url : `/${structured.audio_download_url}`}`
-    : null;
+  const audioSrc = (message.chatId && audioUrls[message.chatId]) || null;
 
   return (
     <div className="space-y-5 text-sm leading-7 text-foreground/95">

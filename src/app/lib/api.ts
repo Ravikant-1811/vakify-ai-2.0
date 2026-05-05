@@ -56,6 +56,39 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   return data as T;
 }
 
+export async function apiFetchBlob(path: string, options: ApiFetchOptions = {}): Promise<Blob> {
+  const headers = new Headers(options.headers || {});
+  const hasBody = options.body !== undefined && options.body !== null;
+
+  if (hasBody && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  if (!options.skipAuth) {
+    const token = getAuthToken();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  }
+
+  const url = path.startsWith('http') ? path : `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    const data = text ? safeJsonParse(text) : null;
+    const message = typeof data === 'object' && data && 'error' in data
+      ? String((data as { error?: string }).error || `Request failed with status ${response.status}`)
+      : `Request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return response.blob();
+}
+
 function safeJsonParse(text: string) {
   try {
     return JSON.parse(text);

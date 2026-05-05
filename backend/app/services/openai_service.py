@@ -108,6 +108,23 @@ def _responses_output_text(data: dict[str, Any] | None) -> str | None:
     return text or None
 
 
+def _normalize_leonardo_model_id(raw_value: str) -> str:
+    value = raw_value.strip()
+    if not value:
+        return ""
+    aliases = {
+        "lucid origin": "7b592283-e8a7-4c5a-9ba6-d18c31f258b9",
+        "lucid-origin": "7b592283-e8a7-4c5a-9ba6-d18c31f258b9",
+        "lucid realism": "05ce0082-2d80-4a2d-8653-4d1c85e2418e",
+        "lucid-realism": "05ce0082-2d80-4a2d-8653-4d1c85e2418e",
+        "leonardo phoenix 1.0": "de7d3faf-762f-48e0-b3b7-9d0ac3a3fcf3",
+        "leonardo-phoenix-1.0": "de7d3faf-762f-48e0-b3b7-9d0ac3a3fcf3",
+        "leonardo lightning xl": "b24e16ff-06e3-43eb-8d33-4416c2d75876",
+        "leonardo-lightning-xl": "b24e16ff-06e3-43eb-8d33-4416c2d75876",
+    }
+    return aliases.get(value.lower(), value)
+
+
 def chatgpt_json(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict[str, Any] | None:
     responses_data = _responses_request(
         model=OPENAI_FAST_MODEL,
@@ -310,7 +327,7 @@ def generate_image_data_url(prompt: str, size: str = "1024x1024") -> str | None:
                 "highContrast": False,
                 "public": False,
             }
-            model_id = os.getenv("LEONARDO_MODEL_ID", "").strip()
+            model_id = _normalize_leonardo_model_id(os.getenv("LEONARDO_MODEL_ID", "").strip())
             if model_id:
                 payload["modelId"] = model_id
 
