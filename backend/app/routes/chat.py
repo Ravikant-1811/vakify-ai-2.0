@@ -429,6 +429,47 @@ def create_chat_thread():
     return jsonify(_thread_payload(thread)), 201
 
 
+@chat_bp.delete("/threads/<int:thread_id>")
+@jwt_required()
+def delete_chat_thread(thread_id: int):
+    user_id = int(get_jwt_identity())
+    thread = ChatThread.query.filter_by(thread_id=thread_id, user_id=user_id).first()
+    if not thread:
+        return jsonify({"error": "thread not found"}), 404
+
+    try:
+        linked_chat_ids = [row.chat_id for row in ChatThreadMessage.query.filter_by(thread_id=thread_id, user_id=user_id).all()]
+        if linked_chat_ids:
+            ChatFeedback.query.filter(
+                ChatFeedback.user_id == user_id,
+                ChatFeedback.chat_id.in_(linked_chat_ids),
+            ).delete(synchronize_session=False)
+            ChatThreadMessage.query.filter_by(thread_id=thread_id, user_id=user_id).delete(synchronize_session=False)
+            ChatHistory.query.filter(
+                ChatHistory.user_id == user_id,
+                ChatHistory.chat_id.in_(linked_chat_ids),
+            ).delete(synchronize_session=False)
+        db.session.delete(thread)
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "failed to delete chat thread"}), 500
+
+    threads = (
+        ChatThread.query.filter_by(user_id=user_id)
+        .order_by(ChatThread.last_message_at.desc().nullslast(), ChatThread.created_at.desc())
+        .all()
+    )
+    return jsonify(
+        {
+            "message": "thread deleted",
+            "thread_id": thread_id,
+            "threads": [_thread_payload(item) for item in threads],
+            "active_thread_id": threads[0].thread_id if threads else None,
+        }
+    )
+
+
 @chat_bp.get("/threads/<int:thread_id>/history")
 @jwt_required()
 def thread_history(thread_id: int):

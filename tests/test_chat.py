@@ -302,3 +302,84 @@ def test_chat_audio_generation_and_history(tmp_path, monkeypatch):
     assert len(rows) == 1
     assert rows[0]["response_json"]["audio_download_url"]
     assert rows[0]["response_json"]["audio_download_id"]
+
+
+def test_chat_thread_delete_removes_history(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    from app.services import chatbot_service
+
+    monkeypatch.setattr(chatbot_service, "chatgpt_text", lambda *args, **kwargs: "AI explanation for the topic.")
+    monkeypatch.setattr(
+        chatbot_service,
+        "openai_json_schema",
+        lambda *args, **kwargs: {
+            "title": "Deletion Test",
+            "summary": "A response that can be deleted.",
+            "answer": "This thread should disappear after deletion.",
+            "key_points": ["One"],
+            "follow_up_prompts": ["Delete this chat"],
+            "confidence": "High",
+            "mode": "detailed",
+            "style": "visual",
+        },
+    )
+
+    register = client.post(
+        "/api/auth/register",
+        json={
+            "email": "delete@example.com",
+            "password": "secret123",
+            "display_name": "Delete Learner",
+        },
+    )
+    token = register.get_json()["access_token"]
+
+    style = client.post(
+        "/api/style/select",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"learning_style": "visual"},
+    )
+    assert style.status_code == 200
+
+    thread = client.post(
+        "/api/chat/threads",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "Delete Me"},
+    )
+    assert thread.status_code == 201
+    thread_id = thread.get_json()["thread_id"]
+
+    chat_response = client.post(
+        "/api/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "question": "Explain deletion",
+            "thread_id": thread_id,
+        },
+    )
+    assert chat_response.status_code == 200
+    chat_id = chat_response.get_json()["chat_id"]
+
+    delete_response = client.delete(
+        f"/api/chat/threads/{thread_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert delete_response.status_code == 200
+    payload = delete_response.get_json()
+    assert payload["thread_id"] == thread_id
+    assert payload["threads"] == []
+    assert payload["active_thread_id"] is None
+
+    history = client.get(
+        f"/api/chat/history?thread_id={thread_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert history.status_code == 200
+    assert history.get_json() == []
+
+    threads = client.get(
+        "/api/chat/threads",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert threads.status_code == 200
+    assert threads.get_json()["threads"] == []
