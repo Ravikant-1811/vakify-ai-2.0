@@ -35,6 +35,7 @@ type DashboardSummary = {
 type RewardSummary = {
   wallet: { current_xp: number; level: number; reward_points: number };
   streak: { current_streak: number; longest_streak: number; last_active_date: string | null };
+  earned_badges?: Array<{ name: string; description: string; icon: string; earned: boolean }>;
   recent_xp_events: Array<{ event_id: number; source: string; points: number; created_at: string }>;
 };
 
@@ -146,6 +147,9 @@ export function Dashboard() {
   const languageProgress = summary?.learning_style_breakdown || [];
 
   const leaderboardRows = leaderboard;
+  const earnedBadges = rewards?.earned_badges?.filter((badge) => badge.earned) || [];
+  const lockedBadges = rewards?.earned_badges?.filter((badge) => !badge.earned) || [];
+  const badgeCount = earnedBadges.length;
 
   const completedTasks = tasks.filter((task) => task.status === 'completed').length;
   const dailyTask = tasks[0]
@@ -242,13 +246,15 @@ export function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <Award className="w-8 h-8" />
             <div className="px-3 py-1 bg-white/20 rounded-full text-xs">
-              Earned
+              {badgeCount > 0 ? 'Earned' : 'Starting out'}
             </div>
           </div>
-          <div className="text-3xl mb-1">{Math.max(3, rewards?.recent_xp_events.length || 0)}</div>
+          <div className="text-3xl mb-1">{badgeCount}</div>
           <div className="text-white/80 text-sm">Total Badges</div>
           <div className="mt-4 text-xs text-white/90">
-            3 more this week
+            {badgeCount > 0
+              ? `${lockedBadges.length} more to unlock`
+              : 'Complete tasks and quizzes to earn your first badge'}
           </div>
         </div>
       </div>
