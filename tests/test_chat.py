@@ -207,6 +207,7 @@ def test_chat_image_generation_and_history(tmp_path, monkeypatch):
     data = response.get_json()
     assert data["image_url"] == "https://example.com/generated.png"
     assert data["image_prompt"] == "Clean educational infographic of a binary tree with labeled root, left child, and right child nodes."
+    assert data["attached_to_text"] is True
     assert data["thread_id"] == thread_id
     assert data["chat_id"] == chat_id
 

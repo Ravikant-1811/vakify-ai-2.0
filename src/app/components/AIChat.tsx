@@ -40,6 +40,7 @@ type ChatPayload = {
   thread_title?: string;
   image_url?: string;
   image_prompt?: string;
+  attached_to_text?: boolean;
   audio_download_id?: number;
   audio_download_url?: string;
 };
@@ -345,6 +346,7 @@ export function AIChat() {
   };
 
   const mergeStructuredMessage = (chatId: number, next: ChatPayload) => {
+    const shouldReplaceContent = next.response_type !== 'visual' && next.mode !== 'image';
     setMessages((prev) =>
       prev.map((message) => {
         if (message.chatId !== chatId || message.role !== 'assistant') {
@@ -356,7 +358,7 @@ export function AIChat() {
         };
         return {
           ...message,
-          content: next.answer || next.text || message.content,
+          content: shouldReplaceContent ? (next.answer || next.text || message.content) : message.content,
           confidence: next.confidence || message.confidence,
           followUps: next.follow_up_prompts?.slice(0, 4) || message.followUps,
           structured: mergedStructured,
@@ -796,6 +798,7 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
   const hasNextStep = Boolean(structured.next_step?.trim());
   const hasImagePrompt = Boolean(structured.image_prompt?.trim());
   const hasImage = Boolean(structured.image_url?.trim());
+  const isAttachedImage = Boolean(structured.attached_to_text);
 
   return (
     <div className="space-y-5 text-sm leading-7 text-foreground/95">
@@ -826,29 +829,9 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
           </div>
         </div>
         <div className="space-y-4">
-          {renderRichContent(structured.answer || message.content)}
+          {renderRichContent(isAttachedImage ? message.content : (structured.answer || message.content))}
         </div>
       </div>
-
-      {hasImagePrompt ? (
-        <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Image Prompt</div>
-              <div className="text-sm text-muted-foreground">Stored in the database and used for image generation.</div>
-            </div>
-            <button
-              onClick={() => void navigator.clipboard.writeText(structured.image_prompt || '')}
-              className="rounded-full border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-            >
-              Copy prompt
-            </button>
-          </div>
-          <div className="mt-3 rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 py-3 text-sm leading-7 text-foreground/90">
-            {structured.image_prompt}
-          </div>
-        </div>
-      ) : null}
 
       {hasImage ? (
         <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
@@ -870,6 +853,27 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
               className="h-auto w-full max-h-[28rem] object-cover"
             />
           </div>
+          {isAttachedImage ? (
+            <div className="mt-4 rounded-2xl border border-dashed border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-900">
+              This image is attached to your original answer and uses the saved prompt from the database.
+            </div>
+          ) : null}
+          {hasImagePrompt ? (
+            <details className="mt-4 rounded-2xl border border-dashed border-border/70 bg-muted/10 px-4 py-3">
+              <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.24em] text-muted-foreground">
+                Image prompt
+              </summary>
+              <div className="mt-3 flex items-start justify-between gap-3">
+                <p className="text-sm leading-7 text-foreground/90">{structured.image_prompt}</p>
+                <button
+                  onClick={() => void navigator.clipboard.writeText(structured.image_prompt || '')}
+                  className="rounded-full border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors shrink-0"
+                >
+                  Copy
+                </button>
+              </div>
+            </details>
+          ) : null}
         </div>
       ) : null}
 

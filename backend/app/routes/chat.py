@@ -293,6 +293,7 @@ def generate_chat_image():
         "title": image_title,
         "image_url": image_url,
         "image_prompt": prompt,
+        "attached_to_text": source_row is not None,
         "confidence": "High",
         "response_type": "visual",
         "mode": "image",
