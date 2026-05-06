@@ -847,6 +847,12 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
   const hasImagePrompt = Boolean(asString(structured.image_prompt).trim());
   const hasImage = Boolean(asString(structured.image_url).trim());
   const isAttachedImage = Boolean(structured.attached_to_text);
+  const titleText = asString(structured.title).trim() || 'Structured response';
+  const summaryText = asString(structured.summary).trim() || 'A concise overview with answer, examples, and next steps.';
+  const imageUrl = asString(structured.image_url).trim();
+  const imagePrompt = asString(structured.image_prompt).trim();
+  const quizQuestion = asString(structured.quiz_question).trim() || 'Quick check';
+  const codeSample = asString(structured.code_sample);
 
   return (
     <div className="space-y-5 text-sm leading-7 text-foreground/95">
@@ -855,10 +861,10 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
           <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Assistant Response</div>
             <div className="mt-1 text-lg font-semibold leading-tight text-foreground">
-              {structured.title || 'Structured response'}
+              {titleText}
             </div>
             <div className="mt-2 text-sm text-muted-foreground">
-              {structured.summary || 'A concise overview with answer, examples, and next steps.'}
+              {summaryText}
             </div>
           </div>
           <div className="flex flex-col items-end gap-2 text-xs">
@@ -886,7 +892,7 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Image Result</div>
-              <div className="text-sm text-muted-foreground">{structured.summary || 'Generated visual response.'}</div>
+              <div className="text-sm text-muted-foreground">{summaryText || 'Generated visual response.'}</div>
             </div>
             <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
               Visual
@@ -894,8 +900,8 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
           </div>
           <div className="mt-4 overflow-hidden rounded-3xl border border-border/70 bg-muted/20">
             <img
-              src={structured.image_url}
-              alt={structured.image_prompt || structured.title || 'Generated visual'}
+              src={imageUrl}
+              alt={imagePrompt || titleText || 'Generated visual'}
               className="h-auto w-full max-h-[28rem] object-cover"
             />
           </div>
@@ -915,7 +921,7 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
                   Copy
                 </button>
               </div>
-              <p className="mt-3 text-sm leading-7 text-foreground/90">{structured.image_prompt}</p>
+              <p className="mt-3 text-sm leading-7 text-foreground/90">{imagePrompt}</p>
             </div>
           ) : null}
         </div>
@@ -981,14 +987,14 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
                   <div className="text-sm text-slate-300/90">Copy, edit, and run this snippet in the lab.</div>
                 </div>
                 <button
-                  onClick={() => void navigator.clipboard.writeText(structured.code_sample || '')}
+                  onClick={() => void navigator.clipboard.writeText(codeSample)}
                   className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-white/10 transition-colors"
                 >
                   Copy code
                 </button>
               </div>
               <pre className="overflow-x-auto text-xs leading-6 text-slate-100">
-                <code>{structured.code_sample}</code>
+                <code>{codeSample}</code>
               </pre>
             </div>
           ) : null}
@@ -1004,7 +1010,7 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
             {hasQuiz ? (
               <div className="rounded-3xl border border-border/70 bg-card px-4 py-4 md:px-5">
                 <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Quick Check</div>
-                <div className="mt-3 text-base font-semibold text-foreground">{structured.quiz_question || 'Quick check'}</div>
+                <div className="mt-3 text-base font-semibold text-foreground">{quizQuestion}</div>
                 {quizOptions.length ? (
                   <div className="mt-4 space-y-2">
                     {quizOptions.map((option) => (
