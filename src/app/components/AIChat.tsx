@@ -836,16 +836,16 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
     return <div className="space-y-4 text-sm leading-7 text-foreground/95">{renderRichContent(message.content)}</div>;
   }
 
-  const keyPoints = (structured.key_points || []).filter(Boolean);
-  const followUps = (structured.follow_up_prompts || []).filter(Boolean);
-  const quizOptions = (structured.quiz_options || []).filter(Boolean);
-  const hasExample = Boolean(structured.example?.trim());
-  const hasCode = Boolean(structured.code_sample?.trim());
-  const hasPractice = Boolean(structured.practice?.trim());
-  const hasQuiz = Boolean(structured.quiz_question?.trim() || quizOptions.length);
-  const hasNextStep = Boolean(structured.next_step?.trim());
-  const hasImagePrompt = Boolean(structured.image_prompt?.trim());
-  const hasImage = Boolean(structured.image_url?.trim());
+  const keyPoints = toStringArray(structured.key_points);
+  const followUps = toStringArray(structured.follow_up_prompts);
+  const quizOptions = toStringArray(structured.quiz_options);
+  const hasExample = Boolean(asString(structured.example).trim());
+  const hasCode = Boolean(asString(structured.code_sample).trim());
+  const hasPractice = Boolean(asString(structured.practice).trim());
+  const hasQuiz = Boolean(asString(structured.quiz_question).trim() || quizOptions.length);
+  const hasNextStep = Boolean(asString(structured.next_step).trim());
+  const hasImagePrompt = Boolean(asString(structured.image_prompt).trim());
+  const hasImage = Boolean(asString(structured.image_url).trim());
   const isAttachedImage = Boolean(structured.attached_to_text);
 
   return (
@@ -1043,8 +1043,9 @@ function renderStructuredAssistant(message: Message, onFollowUpPrompt: (prompt: 
   );
 }
 
-function renderRichContent(content: string) {
-  const blocks = parseBlocks(content);
+function renderRichContent(content: unknown) {
+  const safeContent = asString(content);
+  const blocks = parseBlocks(safeContent);
   return blocks.map((block, index) => {
     if (block.type === 'heading') {
       return (
@@ -1122,7 +1123,7 @@ function renderRichContent(content: string) {
 }
 
 function renderInline(text: string) {
-  const html = escapeHtml(text)
+  const html = escapeHtml(asString(text))
     .replace(/`([^`]+)`/g, '<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em]">$1</code>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -1140,7 +1141,7 @@ function escapeHtml(text: string) {
     .replace(/'/g, '&#39;');
 }
 
-function parseBlocks(content: string): Array<
+function parseBlocks(content: unknown): Array<
   | { type: 'paragraph'; text: string }
   | { type: 'heading'; text: string }
   | { type: 'quote'; text: string }
@@ -1149,7 +1150,8 @@ function parseBlocks(content: string): Array<
   | { type: 'code'; text: string }
   | { type: 'table'; rows: string[][] }
 > {
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const safeContent = asString(content);
+  const lines = safeContent.replace(/\r\n/g, '\n').split('\n');
   const blocks: Array<any> = [];
   let buffer: string[] = [];
   let codeBuffer: string[] | null = null;
@@ -1266,7 +1268,25 @@ function parseBlocks(content: string): Array<
   flushOrdered();
   flushTable();
 
-  return blocks.length ? blocks : [{ type: 'paragraph', text: content }];
+  return blocks.length ? blocks : [{ type: 'paragraph', text: safeContent }];
+}
+
+function asString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value == null) return '';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asString(item).trim())
+    .filter(Boolean);
 }
 
 function safeParseChatPayload(raw: string): ChatPayload | null {

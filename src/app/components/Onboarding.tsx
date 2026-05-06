@@ -264,7 +264,6 @@ export function Onboarding() {
                 await finishOnboarding();
               }}
               disabled={
-                (step === 1 && (assessmentLoading || assessmentQuestions.length === 0 || answeredCount < assessmentQuestions.length)) ||
                 (step === 2 && !selectedLanguage) ||
                 (step === 3 && !canFinish)
               }
